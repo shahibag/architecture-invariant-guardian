@@ -1,0 +1,2 @@
+"""Stable domain contracts."""
+

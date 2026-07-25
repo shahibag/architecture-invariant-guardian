@@ -1,0 +1,23 @@
+name: Invariant Guardian
+description: Assess Java/Spring pull requests against repository-owned architectural invariants.
+author: Invariant Guardian contributors
+
+inputs:
+  github-token:
+    description: Token with contents:read and pull-requests:write permissions.
+    required: true
+  openai-api-key:
+    description: Optional OpenAI key for evidence judgment in trusted repository contexts.
+    required: false
+  model:
+    description: OpenAI model identifier used by the evidence judge.
+    required: false
+  invariant-path:
+    description: Base-repository directory containing Markdown invariant files.
+    required: false
+    default: .guardian/invariants
+
+runs:
+  using: docker
+  image: Dockerfile
+  args: [run-action]
