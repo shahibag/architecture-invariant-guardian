@@ -11,7 +11,7 @@ The first runnable slice loads Markdown invariants and scans unified Java diffs 
 - temporary monitoring, polling, or wait-retry workarounds;
 - public boundaries that expose likely persistence/domain types.
 
-Candidates are intentionally conservative. OpenAI evidence judgment and GitHub comment publishing remain the next slices, pending secure OpenAI Platform reauthentication.
+Candidates are intentionally conservative. The OpenAI evidence-judge and GitHub comment adapters are implemented behind stable ports; their live end-to-end verification remains pending secure OpenAI Platform reauthentication.
 
 ## Local use
 
@@ -26,3 +26,30 @@ invariant-guardian assess \
 
 See [the implementation-ready MVP specification](docs/implementation-ready-mvp.md) for the required Markdown format, execution policy, and delivery plan.
 
+## GitHub Action use
+
+Target repositories should run the Action on `pull_request` and grant only the permissions it needs:
+
+```yaml
+name: Invariant Guardian
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  assess:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: your-org/invariant-guardian@v0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-5.6-terra
+```
+
+Fork pull requests do not use the OpenAI key and do not publish a comment.

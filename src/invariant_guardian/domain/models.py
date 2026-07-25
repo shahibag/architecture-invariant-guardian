@@ -12,6 +12,7 @@ class Severity(StrEnum):
 
 class AssessmentStatus(StrEnum):
     NO_CONFIRMED_VIOLATIONS = "no_confirmed_violations"
+    CONFIRMED_VIOLATIONS = "confirmed_violations"
     CANDIDATES_REQUIRE_JUDGMENT = "candidates_require_judgment"
     INCOMPLETE = "assessment_incomplete"
 
@@ -42,8 +43,13 @@ class CandidateFinding(BaseModel):
     confidence: str
 
 
+class Violation(CandidateFinding):
+    why_it_matters: str
+    suggested_direction: str
+
+
 class Assessment(BaseModel):
     status: AssessmentStatus
     candidates: list[CandidateFinding] = Field(default_factory=list)
+    violations: list[Violation] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-

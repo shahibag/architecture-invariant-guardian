@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from invariant_guardian.adapters.github.client import GitHubClient
+from invariant_guardian.adapters.openai.judge import OpenAIJudge
 from invariant_guardian.application import assess_diff
 from invariant_guardian.domain.models import Assessment, AssessmentStatus
 from invariant_guardian.invariants import load_invariants
@@ -34,9 +35,16 @@ def run() -> int:
             os.environ.get("INPUT_INVARIANT_PATH", ".guardian/invariants"),
         )
         invariants, warnings = load_invariants(invariant_dir)
-        assessment = assess_diff(invariant_dir, client.pull_diff())
+        diff = client.pull_diff()
+        assessment = assess_diff(invariant_dir, diff)
         assessment.warnings.extend(warnings)
-        if assessment.candidates and not os.environ.get("INPUT_OPENAI_API_KEY"):
+        api_key = os.environ.get("INPUT_OPENAI_API_KEY")
+        if assessment.candidates and api_key:
+            assessment = OpenAIJudge(
+                api_key=api_key,
+                model=os.environ.get("INPUT_MODEL", "gpt-5.6-terra"),
+            ).confirm(invariants, assessment.candidates, diff)
+        elif assessment.candidates:
             assessment = Assessment(
                 status=AssessmentStatus.INCOMPLETE,
                 warnings=[

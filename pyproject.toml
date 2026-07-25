@@ -9,6 +9,7 @@ description = "Repository-owned architecture invariant checks for pull requests.
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "openai>=1.0,<3",
   "pydantic>=2.11,<3",
   "PyYAML>=6.0,<7",
 ]
@@ -25,4 +26,3 @@ packages = ["src/invariant_guardian"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-

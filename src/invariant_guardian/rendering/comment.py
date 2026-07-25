@@ -28,6 +28,21 @@ def render_comment(assessment: Assessment, invariants: list[Invariant], key: str
         lines.append("No confirmed invariant violations were found in the evaluated changes.")
     elif assessment.status == AssessmentStatus.INCOMPLETE:
         lines.append("⚠️ Assessment incomplete. This is not a clean review.")
+    elif assessment.status == AssessmentStatus.CONFIRMED_VIOLATIONS:
+        lines.append("Confirmed violations require human review.")
+        lines.append("")
+        for violation in assessment.violations:
+            lines.extend(
+                [
+                    f"### {title_by_id.get(violation.invariant_id, violation.invariant_id)}",
+                    f"- Location: {violation.file}:{violation.start_line}",
+                    f"- Why it matters: {violation.why_it_matters}",
+                    f"- Evidence: {violation.evidence}",
+                    f"- Suggested direction: {violation.suggested_direction}",
+                    f"- Confidence: {violation.confidence}",
+                    "",
+                ]
+            )
     else:
         lines.extend(
             [
