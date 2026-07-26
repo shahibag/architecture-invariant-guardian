@@ -35,7 +35,8 @@ class GitHubClient:
         for entry in listing:
             if entry.get("type") != "file" or not entry.get("name", "").endswith(".md"):
                 continue
-            contents = self._json(f"{entry['url']}?ref={ref}")
+            # entry["url"] already carries the ref from the listing call.
+            contents = self._json(entry["url"])
             encoded = contents.get("content", "")
             (destination / entry["name"]).write_bytes(
                 base64.b64decode(encoded.encode("ascii"))
