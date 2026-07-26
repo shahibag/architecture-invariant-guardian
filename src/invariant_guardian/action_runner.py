@@ -40,19 +40,28 @@ def run() -> int:
         assessment.warnings.extend(warnings)
         api_key = os.environ.get("INPUT_LLM-API-KEY") or os.environ.get("LLM_API_KEY")
         if assessment.candidates and api_key:
-            assessment = OpenAICompatibleJudge(
-                api_key=api_key,
-                model=(
-                    os.environ.get("INPUT_MODEL")
-                    or os.environ.get("LLM_MODEL")
-                    or "deepseek-v4-flash"
-                ),
-                base_url=(
-                    os.environ.get("INPUT_LLM-BASE-URL")
-                    or os.environ.get("LLM_BASE_URL")
-                    or "https://api.deepseek.com"
-                ),
-            ).confirm(invariants, assessment.candidates, diff)
+            try:
+                assessment = OpenAICompatibleJudge(
+                    api_key=api_key,
+                    model=(
+                        os.environ.get("INPUT_MODEL")
+                        or os.environ.get("LLM_MODEL")
+                        or "deepseek-v4-flash"
+                    ),
+                    base_url=(
+                        os.environ.get("INPUT_LLM-BASE-URL")
+                        or os.environ.get("LLM_BASE_URL")
+                        or "https://api.deepseek.com"
+                    ),
+                ).confirm(invariants, assessment.candidates, diff)
+            except Exception as exc:
+                assessment = Assessment(
+                    status=AssessmentStatus.INCOMPLETE,
+                    warnings=[
+                        *assessment.warnings,
+                        f"AI evidence judgment failed: {exc}",
+                    ],
+                )
         elif assessment.candidates:
             assessment = Assessment(
                 status=AssessmentStatus.INCOMPLETE,

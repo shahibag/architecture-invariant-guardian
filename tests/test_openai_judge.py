@@ -71,6 +71,14 @@ def test_judge_confirms_only_an_existing_candidate() -> None:
     assert client.chat.completions.request["response_format"]["type"] == "json_object"
 
 
+def test_judge_raises_on_malformed_response() -> None:
+    client = FakeClient({"unexpected": True})
+    with pytest.raises(Exception):
+        OpenAICompatibleJudge("unused", client=client).confirm(
+            [INVARIANT], [CANDIDATE], "diff"
+        )
+
+
 def test_judge_rejects_unknown_candidate_index() -> None:
     client = FakeClient(
         {
