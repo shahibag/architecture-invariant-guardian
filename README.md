@@ -11,7 +11,7 @@ The first runnable slice loads Markdown invariants and scans unified Java diffs 
 - temporary monitoring, polling, or wait-retry workarounds;
 - public boundaries that expose likely persistence/domain types.
 
-Candidates are intentionally conservative. The OpenAI evidence-judge and GitHub comment adapters are implemented behind stable ports; their live end-to-end verification remains pending secure OpenAI Platform reauthentication.
+Candidates are intentionally conservative. The evidence judge uses the OpenAI Python SDK against an OpenAI-compatible Chat Completions endpoint; the default is DeepSeek V4 Flash. Its live end-to-end verification remains pending a configured provider key.
 
 ## Local use
 
@@ -48,8 +48,32 @@ jobs:
       - uses: your-org/invariant-guardian@v0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          model: gpt-5.6-terra
+          llm-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          llm-base-url: https://api.deepseek.com
+          model: deepseek-v4-flash
 ```
 
-Fork pull requests do not use the OpenAI key and do not publish a comment.
+Fork pull requests do not use the provider key and do not publish a comment.
+
+## Provider configuration
+
+The Action uses the OpenAI Python SDK, but the endpoint and model are inputs. The default configuration is DeepSeek V4 Flash:
+
+| Input | Default |
+| --- | --- |
+| `llm-base-url` | `https://api.deepseek.com` |
+| `model` | `deepseek-v4-flash` |
+| `llm-api-key` | no default; pass a GitHub Actions secret |
+
+For OpenAI, set `llm-base-url` to `https://api.openai.com/v1` and select a Chat Completions-compatible model. The adapter requests JSON mode and always validates the response locally with Pydantic before publishing a finding.
+
+### Secret storage
+
+- **Local development:** create `.env.local` in the repository and store `LLM_API_KEY=...`; this file is ignored by Git. Restrict it to your user account (`chmod 600 .env.local`).
+- **GitHub Actions:** add `DEEPSEEK_API_KEY` as a repository or organization Actions secret, then pass it through `llm-api-key`. Never put a key in `action.yml`, a workflow file, Docker build arguments, commit history, or logs.
+
+Copy .env.local.example to .env.local for the local variable names. The action runner also accepts LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL when invoked outside GitHub Actions.
+
+## End-to-end verification
+
+Follow the [end-to-end test plan](docs/end-to-end-test-plan.md) using two private repositories: one for the Action and one Java/Spring demo repository. It covers confirmed violations, clean changes, idempotency, fork safety, and provider failures.

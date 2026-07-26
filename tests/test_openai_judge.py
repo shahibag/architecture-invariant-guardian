@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from invariant_guardian.adapters.openai.judge import OpenAIJudge
+from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
 from invariant_guardian.domain.models import CandidateFinding, Invariant, InvariantScope, Severity
 
 
@@ -35,12 +35,18 @@ class FakeResponses:
 
     def create(self, **kwargs):
         self.request = kwargs
-        return SimpleNamespace(output_text=json.dumps(self._output))
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(self._output))
+                )
+            ]
+        )
 
 
 class FakeClient:
     def __init__(self, output: dict) -> None:
-        self.responses = FakeResponses(output)
+        self.chat = SimpleNamespace(completions=FakeResponses(output))
 
 
 def test_judge_confirms_only_an_existing_candidate() -> None:
@@ -56,13 +62,13 @@ def test_judge_confirms_only_an_existing_candidate() -> None:
             ]
         }
     )
-    assessment = OpenAIJudge("unused", client=client).confirm(
+    assessment = OpenAICompatibleJudge("unused", client=client).confirm(
         [INVARIANT], [CANDIDATE], "diff"
     )
 
     assert assessment.violations[0].file == CANDIDATE.file
     assert assessment.violations[0].suggested_direction == "Return a DTO instead."
-    assert client.responses.request["text"]["format"]["type"] == "json_schema"
+    assert client.chat.completions.request["response_format"]["type"] == "json_object"
 
 
 def test_judge_rejects_unknown_candidate_index() -> None:
@@ -80,4 +86,6 @@ def test_judge_rejects_unknown_candidate_index() -> None:
     )
 
     with pytest.raises(ValueError, match="unknown candidate"):
-        OpenAIJudge("unused", client=client).confirm([INVARIANT], [CANDIDATE], "diff")
+        OpenAICompatibleJudge("unused", client=client).confirm(
+            [INVARIANT], [CANDIDATE], "diff"
+        )

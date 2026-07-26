@@ -6,12 +6,17 @@ inputs:
   github-token:
     description: Token with contents:read and pull-requests:write permissions.
     required: true
-  openai-api-key:
-    description: Optional OpenAI key for evidence judgment in trusted repository contexts.
+  llm-api-key:
+    description: Optional API key for an OpenAI-compatible evidence judge in trusted repository contexts.
     required: false
   model:
-    description: OpenAI model identifier used by the evidence judge.
+    description: OpenAI-compatible model identifier used by the evidence judge.
     required: false
+    default: deepseek-v4-flash
+  llm-base-url:
+    description: OpenAI-compatible base URL, such as https://api.deepseek.com.
+    required: false
+    default: https://api.deepseek.com
   invariant-path:
     description: Base-repository directory containing Markdown invariant files.
     required: false
