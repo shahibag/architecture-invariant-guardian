@@ -76,7 +76,7 @@ class OpenAICompatibleJudge:
                 },
             ],
             response_format={"type": "json_object"},
-            max_output_tokens=1200,
+            max_tokens=1200,
             temperature=0,
         )
         content = response.choices[0].message.content
