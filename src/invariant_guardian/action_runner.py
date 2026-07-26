@@ -15,9 +15,9 @@ from invariant_guardian.rendering.comment import fingerprint, render_comment
 
 def run() -> int:
     event_path = os.environ.get("GITHUB_EVENT_PATH")
-    token = os.environ.get("INPUT_GITHUB_TOKEN")
+    token = os.environ.get("INPUT_GITHUB-TOKEN")
     if not event_path or not token:
-        raise RuntimeError("GITHUB_EVENT_PATH and INPUT_GITHUB_TOKEN are required")
+        raise RuntimeError("GITHUB_EVENT_PATH and INPUT_GITHUB-TOKEN are required")
     event = json.loads(Path(event_path).read_text(encoding="utf-8"))
     pull_request = event.get("pull_request")
     if not pull_request:
@@ -32,13 +32,13 @@ def run() -> int:
         client.write_invariants(
             invariant_dir,
             pull_request["base"]["sha"],
-            os.environ.get("INPUT_INVARIANT_PATH", ".guardian/invariants"),
+            os.environ.get("INPUT_INVARIANT-PATH", ".guardian/invariants"),
         )
         invariants, warnings = load_invariants(invariant_dir)
         diff = client.pull_diff()
         assessment = assess_diff(invariant_dir, diff)
         assessment.warnings.extend(warnings)
-        api_key = os.environ.get("INPUT_LLM_API_KEY") or os.environ.get("LLM_API_KEY")
+        api_key = os.environ.get("INPUT_LLM-API-KEY") or os.environ.get("LLM_API_KEY")
         if assessment.candidates and api_key:
             assessment = OpenAICompatibleJudge(
                 api_key=api_key,
@@ -48,7 +48,7 @@ def run() -> int:
                     or "deepseek-v4-flash"
                 ),
                 base_url=(
-                    os.environ.get("INPUT_LLM_BASE_URL")
+                    os.environ.get("INPUT_LLM-BASE-URL")
                     or os.environ.get("LLM_BASE_URL")
                     or "https://api.deepseek.com"
                 ),

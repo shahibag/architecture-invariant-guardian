@@ -12,7 +12,7 @@ def test_action_runner_rejects_non_pull_request_events(
     event = tmp_path / "event.json"
     event.write_text(json.dumps({}), encoding="utf-8")
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
-    monkeypatch.setenv("INPUT_GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("INPUT_GITHUB-TOKEN", "test-token")
 
     with pytest.raises(RuntimeError, match="pull_request"):
         run()
@@ -27,7 +27,7 @@ def test_action_runner_skips_forked_pull_requests(
         encoding="utf-8",
     )
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
-    monkeypatch.setenv("INPUT_GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("INPUT_GITHUB-TOKEN", "test-token")
 
     assert run() == 0
     assert json.loads(capsys.readouterr().out)["reason"] == "fork PR"
