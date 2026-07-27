@@ -74,6 +74,7 @@ class CandidateFinding(BaseModel):
     pattern: str
     evidence: str
     confidence: str
+    related_evidence: str | None = None
 
 
 class Violation(CandidateFinding):
@@ -153,6 +154,7 @@ class JudgeCandidate(BaseModel):
     end_line: int
     evidence: str = Field(min_length=1)
     context_hunk: str = Field(min_length=1)
+    related_evidence: str | None = None
 
 
 class JudgeDecision(BaseModel):

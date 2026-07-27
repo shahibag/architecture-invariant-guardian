@@ -18,6 +18,36 @@ class TestBotLogin:
         assert BOT_LOGIN == "github-actions[bot]"
 
 
+class TestSourceRootDiscovery:
+    def test_preserves_module_prefixes(self) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+        client._json = lambda *args, **kwargs: {
+            "truncated": False,
+            "tree": [
+                {
+                    "type": "blob",
+                    "path": "module-api/src/main/java/com/acme/api/C.java",
+                },
+                {
+                    "type": "blob",
+                    "path": "module-domain/src/main/java/com/acme/domain/Order.java",
+                },
+            ],
+        }
+        assert set(client.list_source_roots("exact-sha") or []) == {
+            "module-api/src/main/java",
+            "module-domain/src/main/java",
+        }
+
+    def test_truncated_tree_is_unavailable_not_partial(self) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+        client._json = lambda *args, **kwargs: {
+            "truncated": True,
+            "tree": [{"type": "blob", "path": "src/main/java/A.java"}],
+        }
+        assert client.list_source_roots("exact-sha") is None
+
+
 # ---------------------------------------------------------------------------
 # is_bot_comment
 # ---------------------------------------------------------------------------

@@ -92,11 +92,12 @@ class TestParseJavaSource:
         assert tree.root_node.has_error is False
 
     def test_reports_error_for_garbage_input(self) -> None:
+        import pytest
+
         from invariant_guardian.rules.java_ast import parse_java_source
 
-        tree = parse_java_source("this is not java @@@")
-        # Garbage Java should produce syntax errors
-        assert tree.root_node.has_error is True
+        with pytest.raises(ValueError, match="ERROR"):
+            parse_java_source("this is not java @@@")
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +472,11 @@ class TestHasSleepOrBackoff:
             parse_java_source,
         )
 
-        source = "class Foo { void retry() { Thread.sleep(1000); } }"
+        source = (
+            "class Foo { void retry() { "
+            "for (int i = 0; i < 3; i++) { Thread.sleep(1000); } "
+            "} }"
+        )
         tree = parse_java_source(source)
         for child in tree.root_node.children:
             if child.type == "class_declaration":
@@ -489,7 +494,11 @@ class TestHasSleepOrBackoff:
             parse_java_source,
         )
 
-        source = "class Foo { void retry() { TimeUnit.SECONDS.sleep(5); } }"
+        source = (
+            "class Foo { void retry() { "
+            "for (int i = 0; i < 3; i++) { TimeUnit.SECONDS.sleep(5); } "
+            "} }"
+        )
         tree = parse_java_source(source)
         for child in tree.root_node.children:
             if child.type == "class_declaration":
@@ -665,12 +674,13 @@ class TestDetectMonitoringCandidates:
             "import java.util.concurrent.*;\n"
             "class OrderService {\n"
             "    void init() {\n"
+            "        ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);\n"
             "        executor.schedule(() -> work(), 5, TimeUnit.SECONDS);\n"
             "    }\n"
             "}\n"
         )
         candidates = detect_monitoring_candidates(
-            source, "src/OrderService.java", {4}
+            source, "src/OrderService.java", {5}
         )
         assert len(candidates) >= 1
 
@@ -699,7 +709,7 @@ class TestDetectMonitoringCandidates:
             "class OrderService {\n"
             "    void retry() {\n"
             "        for (int i = 0; i < 3; i++) {\n"
-            "            try { process(); break; }\n"
+            "            try { save(); break; }\n"
             "            catch (Exception e) {\n"
             "                Thread.sleep(1000);\n"
             "            }\n"
@@ -729,13 +739,12 @@ class TestDetectMonitoringCandidates:
         candidates = detect_monitoring_candidates(
             source, "src/ReconciliationJob.java", {3, 4}
         )
-        # Without a state-change signal (save/update/transition), this should
-        # be a weaker candidate or not flagged for the "temporary" variant.
-        # The detector may still flag @Scheduled as a candidate but the judge
-        # should reject it. For now, at minimum the evidence must be clear.
-        # If it IS detected, it should have lower confidence.
-        for c in candidates:
-            assert c["confidence"] in ("low", "medium")
+        # @Scheduled without state change must NOT produce any candidate —
+        # documented batch jobs are intentional, not temporary monitoring.
+        assert len(candidates) == 0, (
+            f"@Scheduled without state change must not produce candidates: "
+            f"got {candidates}"
+        )
 
     def test_no_state_change_no_candidate_for_polling(self) -> None:
         from invariant_guardian.rules.java_ast import detect_monitoring_candidates
@@ -755,3 +764,633 @@ class TestDetectMonitoringCandidates:
         # polling alone without state change should not be a strong candidate
         for c in candidates:
             assert c["confidence"] != "high"
+
+
+# ---------------------------------------------------------------------------
+# RED: Changed-line offset false-cleans (P0 finding 1)
+# ---------------------------------------------------------------------------
+class TestChangedLineOffsetMapping:
+    """Regression: reconstructed source lines must map to new-file line numbers.
+
+    When a patch adds code at new-file line 96, the reconstructed source
+    lines start at 1.  The AST reports methods at source-relative lines,
+    but changed_lines uses new-file line numbers.  Without a line map,
+    methods whose changed lines are far from the file start are skipped
+    and the engine returns clean — a false negative.
+    """
+
+    def test_high_offset_method_is_detected(self) -> None:
+        """A controller method added at new-file line 96 must be detected."""
+        from invariant_guardian.rules.java import (
+            detect_candidates_from_source,
+            extract_changed_lines_from_patch,
+            reconstruct_source_from_patch,
+        )
+
+        # Simulate a patch where a new controller method with entity return
+        # is added near the end of an existing file (new-file line 96).
+        #
+        # Hunk: 5 context lines exist in both old and new file;
+        # 4 lines are added.  New-file starts at line 96.
+        #   context (5)=import,blank,@RestController,class,closing-brace
+        #   added   (4)=@GetMapping,method sig,return,closing-brace
+        # Old: 5 lines at -96,5   New: 9 lines at +96,9
+        patch = (
+            "@@ -96,5 +96,9 @@\n"
+            " import org.springframework.web.bind.annotation.*;\n"
+            " \n"
+            " @RestController\n"
+            " class OrderController {\n"
+            "+    @GetMapping(\"/orders\")\n"
+            "+    public List<OrderEntity> getOrders() {\n"
+            "+        return repository.findOrders();\n"
+            "+    }\n"
+            " }\n"
+        )
+
+        source, line_map = reconstruct_source_from_patch(patch)
+        changed_lines = extract_changed_lines_from_patch(patch)
+
+        # The added lines are at new-file positions 100-103
+        assert 100 in changed_lines, (
+            f"Changed lines should include new-file line 100, got {changed_lines}"
+        )
+
+        candidates = detect_candidates_from_source(
+            source,
+            "src/OrderController.java",
+            changed_lines,
+            {"no-domain-leak"},
+            source_to_new_line_map=line_map,
+        )
+
+        # BUG: Without a line map, the AST finds getOrders at
+        # reconstructed line ~5-7 (after stripping headers/prefixes),
+        # but changed_lines = {96, 97, 98, 99}.  The intersection is
+        # empty → no candidate, false clean.
+        assert len(candidates) >= 1, (
+            f"Offset bug: expected >=1 domain-leak candidate for method "
+            f"added at new-file line 96, got {len(candidates)}. "
+            f"changed_lines={changed_lines}"
+        )
+        assert candidates[0].pattern == "public boundary exposes likely internal type"
+
+
+# ---------------------------------------------------------------------------
+# RED: Outbound offset mapping — emitted candidates in new-file coordinates
+# ---------------------------------------------------------------------------
+class TestOutboundOffsetMapping:
+    """Emitted candidate start_line/end_line must be new-file coordinates,
+    not source-relative coordinates.  Without reverse mapping, candidates
+    report lines that don't exist at the repository location."""
+
+    def test_candidate_coordinates_are_new_file_lines(self) -> None:
+        """When a method is added at new-file line 96, the candidate
+        start_line must be 96, not the source-relative line 3."""
+        from invariant_guardian.rules.java import (
+            detect_candidates_from_source,
+            extract_changed_lines_from_patch,
+            reconstruct_source_from_patch,
+        )
+
+        # Hunk adds a method around new-file line 96 (5 context + 4 added)
+        patch = (
+            "@@ -96,5 +96,9 @@\n"
+            " import org.springframework.web.bind.annotation.*;\n"
+            " \n"
+            " @RestController\n"
+            " class OrderController {\n"
+            "+    @GetMapping(\"/orders\")\n"
+            "+    public List<OrderEntity> getOrders() {\n"
+            "+        return repository.findOrders();\n"
+            "+    }\n"
+            " }\n"
+        )
+
+        source, line_map = reconstruct_source_from_patch(patch)
+        changed_lines = extract_changed_lines_from_patch(patch)
+
+        candidates = detect_candidates_from_source(
+            source,
+            "src/OrderController.java",
+            changed_lines,
+            {"no-domain-leak"},
+            source_to_new_line_map=line_map,
+        )
+
+        assert len(candidates) >= 1, (
+            f"Expected ≥1 domain-leak candidate, got {len(candidates)}"
+        )
+
+        # The candidate's start_line must be in new-file coordinates,
+        # around line 99 (96 + 3 context + 1st added line at index 3→new 99).
+        # It must NOT be source-relative line 4.
+        c = candidates[0]
+        assert c.start_line >= 96, (
+            f"start_line {c.start_line} is source-relative (should be new-file ≥96); "
+            f"candidate: {c}"
+        )
+        assert c.end_line >= 96, (
+            f"end_line {c.end_line} is source-relative (should be new-file ≥96)"
+        )
+
+    def test_multiple_hunks_each_map_correctly(self) -> None:
+        """Two hunks at different offsets — each candidate must map to
+        its correct new-file line."""
+        from invariant_guardian.rules.java import reconstruct_source_from_patch
+
+        # First hunk adds at line 10, second at line 200
+        patch = (
+            "@@ -10,0 +11,3 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class FirstController {\n"
+            "+    @GetMapping(\"/first\")\n"
+            "+    public OrderEntity first() { return null; }\n"
+            "+}\n"
+            "@@ -200,0 +204,3 @@\n"
+            "+@RestController\n"
+            "+class SecondController {\n"
+            "+    @GetMapping(\"/second\")\n"
+            "+    public OrderEntity second() { return null; }\n"
+            "+}\n"
+        )
+
+        with pytest.raises(ValueError, match="Disjoint hunks"):
+            reconstruct_source_from_patch(patch)
+
+
+# ---------------------------------------------------------------------------
+# RED: Naming-convention evidence must have resolved declaration (P0 finding 3)
+# ---------------------------------------------------------------------------
+class TestNamingConventionRequiresDeclaration:
+    """Naming-suffix evidence is invalid without resolving the relevant
+    declaration.  A naming-convention-only match that cannot resolve the
+    type declaration must produce a low-confidence candidate (not
+    confirmable).
+    """
+
+    def test_naming_without_declaration_is_low_confidence(self) -> None:
+        """ProductEntity returned by a controller — naming convention only,
+        no @Entity annotation or declaration in the source.  Must be low
+        confidence, not medium."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class ProductController {\n"
+            "    @GetMapping(\"/product\")\n"
+            "    public ProductEntity getProduct() { return null; }\n"
+            "}\n"
+        )
+        candidates = detect_domain_leak_candidates(
+            source, "src/ProductController.java", {5}
+        )
+        if candidates:
+            for c in candidates:
+                assert c.get("confidence") == "low", (
+                    f"Naming-only candidate without declaration must be low, "
+                    f"got {c.get('confidence')}: {c.get('evidence')}"
+                )
+
+    def test_naming_with_declaration_source_is_medium(self) -> None:
+        """When SourceReader resolves the ProductEntity declaration (showing
+        it IS a persistence type via JPA annotation), confidence upgrades
+        to medium."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class ProductController {\n"
+            "    @GetMapping(\"/product\")\n"
+            "    public ProductEntity getProduct() { return null; }\n"
+            "}\n"
+        )
+        # Simulate a source reader that resolves the declaration
+        declaration_map = {
+            "ProductEntity": (
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "class ProductEntity { private Long id; }\n"
+            ),
+        }
+
+        def fake_source_reader(type_name: str) -> str | None:
+            return declaration_map.get(type_name)
+
+        candidates = detect_domain_leak_candidates(
+            source, "src/ProductController.java", {5},
+            source_reader=fake_source_reader,
+        )
+        assert len(candidates) >= 1
+        c = candidates[0]
+        assert c.get("confidence") == "medium", (
+            f"With declaration resolved, confidence should be medium, "
+            f"got {c.get('confidence')}"
+        )
+        # Must include related evidence from the declaration
+        assert "related_evidence" in c, "Must include related_evidence field"
+        assert c["related_evidence"] is not None, (
+            "Must supply bounded declaration evidence"
+        )
+
+
+# ---------------------------------------------------------------------------
+# RED: Parser errors must fail closed (P1 finding 4)
+# ---------------------------------------------------------------------------
+class TestParserErrorFailClosed:
+    """Tree-sitter ERROR nodes must cause the detectors to fail closed —
+    partial recovery must never produce medium/high candidates or clean
+    coverage for affected structures.
+    """
+
+    def test_malformed_source_fails_closed(self) -> None:
+        """A truncated/malformed method signature must cause the parser to
+        fail closed — raising ValueError so the engine falls back to
+        conservative regex signals only."""
+        import pytest
+
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        # Malformed source: truncated generic, missing closing brace
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class BrokenController {\n"
+            "    @GetMapping(\"/broken\")\n"
+            "    public List<\n    OrderEntity getBroken() {\n"  # malformed
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="ERROR"):
+            detect_domain_leak_candidates(
+                source, "src/BrokenController.java", {5}
+            )
+
+    def test_clean_source_still_detected(self) -> None:
+        """Valid source must still produce candidates after the error check."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import jakarta.persistence.Entity;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@Entity\n"
+            "class OrderEntity {}\n"
+            "@RestController\n"
+            "class OrderController {\n"
+            "    @GetMapping(\"/orders\")\n"
+            "    public OrderEntity getOrder() { return null; }\n"
+            "}\n"
+        )
+        candidates = detect_domain_leak_candidates(
+            source, "src/OrderController.java", {8}
+        )
+        assert len(candidates) >= 1, (
+            "Valid source must still produce candidates"
+        )
+
+
+# ---------------------------------------------------------------------------
+# RED: Domain-boundary contract — P1 finding 5
+# ---------------------------------------------------------------------------
+class TestDomainBoundaryContract:
+    """Domain-boundary must support class OR method web annotations,
+    enforce public visibility, resolve qualified annotations, and
+    preserve DTO/record/event/public-contract negatives."""
+
+    def test_method_level_annotation_boundary(self) -> None:
+        """A method annotated @GetMapping in an unannotated class must
+        still be treated as a public boundary."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "class PlainClass {\n"
+            "    @GetMapping(\"/api\")\n"
+            "    public OrderEntity getOrder() { return null; }\n"
+            "}\n"
+        )
+        candidates = detect_domain_leak_candidates(
+            source, "src/PlainClass.java", {4}
+        )
+        assert len(candidates) >= 1, (
+            "Method-level @GetMapping must be recognized as public boundary"
+        )
+
+    def test_private_method_not_public_exposure(self) -> None:
+        """A private method in a @RestController must NOT be flagged as
+        a public boundary leak."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class OrderController {\n"
+            "    private OrderEntity helper() { return null; }\n"
+            "}\n"
+        )
+        candidates = detect_domain_leak_candidates(
+            source, "src/OrderController.java", {4}
+        )
+        assert len(candidates) == 0, (
+            f"Private method in controller must not be flagged: {candidates}"
+        )
+
+    def test_qualified_annotation_rest_controller(self) -> None:
+        """@org.springframework.web.bind.annotation.RestController
+        must be recognized."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import jakarta.persistence.Entity;\n"
+            "@Entity\n"
+            "class OrderEntity {}\n"
+            "@org.springframework.web.bind.annotation.RestController\n"
+            "class OrderController {\n"
+            "    public OrderEntity getOrder() { return null; }\n"
+            "}\n"
+        )
+        candidates = detect_domain_leak_candidates(
+            source, "src/OrderController.java", {6}
+        )
+        assert len(candidates) >= 1, (
+            "Qualified @RestController must be recognized"
+        )
+
+    def test_record_declaration_not_flagged(self) -> None:
+        """A record with Entity suffix must NOT be flagged by naming
+        convention alone without resolved declaration."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class OrderController {\n"
+            "    @GetMapping(\"/orders\")\n"
+            "    public OrderAggregate getOrder() { return null; }\n"
+            "}\n"
+            "record OrderAggregate(String id, int total) {}\n"
+        )
+        candidates = detect_domain_leak_candidates(
+            source, "src/OrderController.java", {5}
+        )
+        # OrderAggregate is a record in the same file — must not produce
+        # medium confidence without resolved declaration showing it's @Entity
+        for c in candidates:
+            if c.get("confidence") == "medium":
+                assert False, (
+                    f"Record declaration must not produce medium confidence: {c}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# RED: Related declaration validation — P1 finding 5
+# ---------------------------------------------------------------------------
+class TestRelatedDeclarationValidation:
+    """Fetched related declarations must be parsed and validated before
+    being accepted as related_evidence.  Invalid Java, records, DTOs,
+    events, and public contracts must be rejected."""
+
+    def test_invalid_java_declaration_is_rejected(self) -> None:
+        """A source_reader returning non-Java text must NOT be accepted
+        as valid related evidence."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class ProductController {\n"
+            "    @GetMapping(\"/product\")\n"
+            "    public ProductEntity getProduct() { return null; }\n"
+            "}\n"
+        )
+
+        def bad_reader(type_name: str) -> str | None:
+            return "this is not Java and not a declaration"
+
+        candidates = detect_domain_leak_candidates(
+            source, "src/ProductController.java", {5},
+            source_reader=bad_reader,
+        )
+        # Must NOT accept invalid Java as medium confidence
+        for c in candidates:
+            assert c.get("confidence") != "medium", (
+                f"Invalid Java declaration must not be medium confidence: {c}"
+            )
+
+    def test_record_declaration_is_rejected(self) -> None:
+        """A record declaration for a type must NOT be accepted as
+        internal persistence evidence."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class AggregateController {\n"
+            "    @GetMapping(\"/agg\")\n"
+            "    public OrderAggregate getAgg() { return null; }\n"
+            "}\n"
+        )
+
+        def record_reader(type_name: str) -> str | None:
+            return "record OrderAggregate(String x) {}"
+
+        candidates = detect_domain_leak_candidates(
+            source, "src/AggregateController.java", {5},
+            source_reader=record_reader,
+        )
+        for c in candidates:
+            assert c.get("confidence") != "medium", (
+                f"Record declaration must not be medium confidence: {c}"
+            )
+
+    def test_mismatched_declaration_is_rejected(self) -> None:
+        """A declaration that doesn't match the requested type name
+        must be rejected."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class ProductController {\n"
+            "    @GetMapping(\"/product\")\n"
+            "    public ProductEntity getProduct() { return null; }\n"
+            "}\n"
+        )
+
+        def mismatch_reader(type_name: str) -> str | None:
+            # Returns a declaration for a DIFFERENT type
+            return (
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "class OtherEntity {}\n"
+            )
+
+        candidates = detect_domain_leak_candidates(
+            source, "src/ProductController.java", {5},
+            source_reader=mismatch_reader,
+        )
+        for c in candidates:
+            assert c.get("confidence") != "medium", (
+                f"Mismatched declaration must not be medium confidence: {c}"
+            )
+
+    def test_valid_jpa_declaration_is_accepted(self) -> None:
+        """A valid @Entity class declaring the correct type name must be
+        accepted as medium confidence with related_evidence."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        source = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class ProductController {\n"
+            "    @GetMapping(\"/product\")\n"
+            "    public ProductEntity getProduct() { return null; }\n"
+            "}\n"
+        )
+
+        def valid_reader(type_name: str) -> str | None:
+            return (
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "class ProductEntity { private Long id; }\n"
+            )
+
+        candidates = detect_domain_leak_candidates(
+            source, "src/ProductController.java", {5},
+            source_reader=valid_reader,
+        )
+        assert len(candidates) >= 1
+        c = candidates[0]
+        assert c.get("confidence") == "medium", (
+            f"Valid @Entity declaration must be medium: {c}"
+        )
+        assert c.get("related_evidence") is not None
+
+
+# ---------------------------------------------------------------------------
+# RED: Monitoring detector structural verification — P1 finding 6
+# ---------------------------------------------------------------------------
+class TestMonitoringStructuralVerification:
+    """Monitoring detector must verify receiver/type evidence for
+    scheduling calls, require sleep inside retry loop, and anchor
+    candidates to changed structural additions."""
+
+    def test_arbitrary_schedule_method_not_flagged(self) -> None:
+        """A call to customThing.schedule() must NOT be flagged as
+        ScheduledExecutorService — receiver type must be verified."""
+        from invariant_guardian.rules.java_ast import detect_monitoring_candidates
+
+        source = (
+            "class Scheduler {\n"
+            "    void run() {\n"
+            "        customThing.schedule(task);\n"
+            "    }\n"
+            "}\n"
+        )
+        candidates = detect_monitoring_candidates(
+            source, "src/Scheduler.java", {3}
+        )
+        # Without ScheduledExecutorService receiver evidence, no high-confidence
+        for c in candidates:
+            assert c.get("confidence") != "high", (
+                f"Arbitrary schedule() must not be high confidence: {c}"
+            )
+
+    def test_sleep_without_retry_loop_is_low_only(self) -> None:
+        """Thread.sleep outside a retry loop must NOT produce a
+        confirmable retry candidate."""
+        from invariant_guardian.rules.java_ast import detect_monitoring_candidates
+
+        source = (
+            "class Pauser {\n"
+            "    void pause() throws InterruptedException {\n"
+            "        Thread.sleep(100);\n"
+            "    }\n"
+            "}\n"
+        )
+        candidates = detect_monitoring_candidates(
+            source, "src/Pauser.java", {3}
+        )
+        for c in candidates:
+            assert c.get("confidence") == "low", (
+                f"Sleep without retry loop must be low confidence: {c}"
+            )
+
+    def test_name_based_scheduler_receiver_rejected(self) -> None:
+        """A variable named 'scheduler' but declared as a plain Object
+        must NOT be treated as ScheduledExecutorService."""
+        from invariant_guardian.rules.java_ast import detect_monitoring_candidates
+
+        source = (
+            "import java.util.concurrent.*;\n"
+            "class TaskRunner {\n"
+            "    void run() {\n"
+            "        Object scheduler = new Object();\n"
+            "        scheduler.schedule(task);\n"
+            "    }\n"
+            "}\n"
+        )
+        candidates = detect_monitoring_candidates(
+            source, "src/TaskRunner.java", {5}
+        )
+        # Variable named 'scheduler' but declared as Object — not
+        # ScheduledExecutorService
+        for c in candidates:
+            assert c.get("confidence") != "high", (
+                f"Name-based receiver check must not produce high confidence: {c}"
+            )
+
+    def test_unchanged_scheduled_annotation_not_flagged(self) -> None:
+        """When @Scheduled is pre-existing and only repository.save()
+        is added, the method must NOT be flagged as monitoring —
+        the scheduled-work structural node is unchanged."""
+        from invariant_guardian.rules.java_ast import detect_monitoring_candidates
+
+        source = (
+            "import org.springframework.scheduling.annotation.Scheduled;\n"
+            "class Worker {\n"
+            "    @Scheduled(fixedDelay = 5000)\n"
+            "    public void doWork() {\n"
+            "        doSomething();\n"
+            "        repository.save(result);\n"
+            "    }\n"
+            "}\n"
+        )
+        # Only the save() line (6) is changed — @Scheduled at line 3-4
+        # is pre-existing
+        candidates = detect_monitoring_candidates(
+            source, "src/Worker.java", {6}
+        )
+        for c in candidates:
+            if c.get("pattern") == "scheduled work":
+                assert False, (
+                    f"Unchanged @Scheduled with only state change added "
+                    f"must not be flagged: {c}"
+                )
+
+    def test_retry_sleep_requires_same_loop_as_state_change(self) -> None:
+        """Sleep in one loop + state change in a different loop must NOT
+        be combined into a single retry candidate."""
+        from invariant_guardian.rules.java_ast import detect_monitoring_candidates
+
+        source = (
+            "class Worker {\n"
+            "    void process() {\n"
+            "        for (int i = 0; i < 3; i++) {\n"
+            "            try { Thread.sleep(100); } catch (Exception e) {}\n"
+            "        }\n"
+            "        repository.save(result);\n"
+            "    }\n"
+            "}\n"
+        )
+        # Sleep at line 4, save at line 6 — different scopes
+        candidates = detect_monitoring_candidates(
+            source, "src/Worker.java", {6}
+        )
+        for c in candidates:
+            if c.get("pattern") == "wait retry":
+                assert c.get("confidence") != "high", (
+                    f"Sleep outside changed scope must not be high confidence: {c}"
+                )

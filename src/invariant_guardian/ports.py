@@ -26,10 +26,32 @@ class BaseRepositoryReader(Protocol):
 
 
 class SourceReader(Protocol):
-    """Fetch changed files from the PR source (e.g. GitHub files endpoint).
+    """Fetch changed files and source content from the PR source (e.g. GitHub).
 
     Each returned :class:`ChangedFile` carries a bounded per-file patch;
     no checkout is performed and PR code is never executed.
     """
 
     def changed_files(self) -> list[ChangedFile]: ...
+
+    def read_file_at_ref(
+        self, path: str, ref: str
+    ) -> bytes | None:
+        """Return raw file content at *path* for *ref* (exact SHA).
+
+        Returns ``None`` when the file is missing, unavailable, or the
+        provider cannot serve it.  The caller must apply size/binary/
+        encoding validation before use.
+        """
+        ...
+
+    def list_source_roots(self, ref: str) -> list[str] | None:
+        """Return known Java source-root directories at *ref* (exact SHA).
+
+        Used for cross-module import resolution.  Returns a (possibly empty)
+        list of repository-relative paths (e.g. ``["src/main/java"]``), or
+        ``None`` when the provider cannot enumerate source roots.
+
+        Implementations must bound entries and response bytes.
+        """
+        ...

@@ -1,0 +1,9 @@
+--- a/src/main/java/com/example/ProductController.java
++++ b/src/main/java/com/example/ProductController.java
+@@ -1,6 +1,6 @@
+ import org.springframework.web.bind.annotation.*;
+ @RestController
+ class ProductController {
+     @GetMapping("/product")
++    public ProductEntity getProduct() { return null; }
+ }

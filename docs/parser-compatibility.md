@@ -2,34 +2,57 @@
 
 ## Decision
 
-Invariant Guardian v0.2 uses **tree-sitter** (`tree-sitter>=0.22,<1`) with the
-**tree-sitter-java** grammar (`tree-sitter-java>=0.21,<1`) for Java structural
-analysis.
+Invariant Guardian v0.2 uses **tree-sitter** with the
+**tree-sitter-java** grammar for Java structural analysis.
+
+## Exact Dependency Matrix
+
+| Component | Version | Notes |
+| --- | --- | --- |
+| tree-sitter | 0.26.0 | `==0.26.0` in pyproject.toml |
+| tree-sitter-java | 0.23.5 | `==0.23.5` in pyproject.toml |
+| Python | 3.12 | `>=3.12` in pyproject.toml |
+| Platform | macOS ARM64 | Linux x86_64 wheels available |
+
+**Parser-pair reproducibility:** The tree-sitter and tree-sitter-java versions are
+pinned in `constraints.txt` and applied by `pip install -c constraints.txt .` and
+`docker build --no-cache .` (the Dockerfile copies and applies constraints.txt).
+Other build and runtime dependencies are ranged in `pyproject.toml` — the
+constraints file guarantees parser-version reproducibility, not a full
+dependency lock.
+
+## Fixture Java Version Metadata
+
+Evaluation fixtures target Java 17 as the primary version.  One fixture
+(dl-neg-014) uses genuine Java 21 record-pattern syntax (`instanceof Point(var x, var y)`).
+Records and text blocks are finalized well before Java 17 (records: Java 16 GA;
+text blocks: Java 15 GA) and are tracked under the Java 17 target.
+
+| Fixture ID | Java Target | Syntax Features |
+| --- | --- | --- |
+| dl-neg-014 | 21 | record pattern in instanceof (Java 21) |
+| All other fixtures | 17 | annotations, generics, records, lambdas, text blocks, etc. |
+
+Per-case `java_target` metadata is checked against the authoritative
+`tests/evaluation/manifest.yaml` during evaluation — the manifest and fixture
+module agree, and `test_manifest_java_targets_consistent` enforces this.
 
 ## Compatibility Test Results
 
 The parser was tested against all Java 17 and Java 21 syntax features required
 by the v0.2 specification. All features parse without errors.
 
-| Feature | Java Version | Passes |
+| Feature | Intro'd | Passes |
 | --- | --- | ---: |
-| Annotations (`@RestController`, `@Entity`, `@GetMapping("/api")`) | 5+ | ✅ |
-| Records (`record Point(int x, int y) {}`) | 16+ | ✅ |
-| Generics (`List<OrderEntity>`, `<R> List<R> process(…)`) | 5+ | ✅ |
-| Nested classes | 1+ | ✅ |
-| Multiline method declarations | 1+ | ✅ |
-| Lambda expressions (`x -> x > 1`) | 8+ | ✅ |
-| Switch expressions (`switch(x) { case 1 -> 10; … }`) | 14+ | ✅ |
-| Text blocks (`"""…"""`) | 15+ | ✅ |
-
-## Version Pinning
-
-- **tree-sitter**: `>=0.22,<1` — minimum 0.22 required for the stable
-  `tree_sitter.Language` API and Python 3.12 wheels.
-- **tree-sitter-java**: `>=0.21,<1` — tested with 0.23.5 on macOS ARM64.
-
-Wheels are available for macOS (ARM64/x86_64) and Linux (x86_64). No
-platform-specific compilation is required at install time.
+| Annotations (`@RestController`, `@Entity`, `@GetMapping("/api")`) | 5 | ✅ |
+| Records (`record Point(int x, int y) {}`) | 14(preview)/16 | ✅ |
+| Generics (`List<OrderEntity>`, `<R> List<R> process(…)`) | 5 | ✅ |
+| Nested classes | 1 | ✅ |
+| Multiline method declarations | 1 | ✅ |
+| Lambda expressions (`x -> x > 1`) | 8 | ✅ |
+| Switch expressions (`switch(x) { case 1 -> 10; … }`) | 14 | ✅ |
+| Text blocks (`"""…"""`) | 13(preview)/15 | ✅ |
+| Record patterns (`o instanceof Point(var x, var y)`) | 19(preview)/21 | ✅ |
 
 ## Security Boundary
 
@@ -37,18 +60,21 @@ platform-specific compilation is required at install time.
   executing or interpreting Java code.
 - No Maven, Gradle, `javac`, annotation processors, or repository build
   scripts are invoked.
-- The parser handles malformed input gracefully: invalid Java produces an
-  error node in the AST but does not crash or hang.
+- The parser rejects malformed input: invalid Java produces an ERROR node
+  in the AST, causing `parse_java_source` to raise `ValueError`.  Partial
+  recovery never produces confirmable candidates.
 - Source strings from pull request patches are treated as untrusted input.
   The parser uses only the `Parser.parse(bytes)` API — no file-system
   access.
 
 ## Graceful Degradation
 
-When the AST-based detector cannot find candidates (e.g., the patch lacks
-enough context for structural analysis), the Phase 1 regex-based detector
-runs as a fallback. The engine never returns a falsely clean result due to
-parser failure.
+When production AST analysis cannot produce complete structural evidence
+(parser error, incomplete source, or unavailable related declaration), the
+assessment records a coverage gap and returns `assessment_incomplete`.
+Production `ReviewEngine` does not fall back to regex, so regex-only text can
+never become a confirmable structural relationship or monitoring finding. The
+legacy `assess_diff` API retains its Phase 1 regex behavior for compatibility.
 
 ## Alternatives Considered
 

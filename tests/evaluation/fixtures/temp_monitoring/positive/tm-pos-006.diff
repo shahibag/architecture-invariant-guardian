@@ -1,0 +1,16 @@
+--- a/src/main/java/com/example/RetryService.java
++++ b/src/main/java/com/example/RetryService.java
+@@ -1,13 +1,13 @@
+ class RetryService {
+     void process() {
++        for (int i = 0; i < 5; i++) {
+             try {
+                 doWork();
+                 repository.save(result);
+                 break;
+             } catch (Exception e) {
+                 Thread.sleep(1000);
+             }
+         }
+     }
+ }

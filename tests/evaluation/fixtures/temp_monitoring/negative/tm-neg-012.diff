@@ -1,0 +1,10 @@
+--- a/src/main/java/com/example/TextBlockUser.java
++++ b/src/main/java/com/example/TextBlockUser.java
+@@ -1,7 +1,7 @@
+ class TextBlockUser {
+     void example() {
++        String sql = """
+             SELECT * FROM orders WHERE status = "PENDING"
+             """ ;
+     }
+ }

@@ -4,6 +4,7 @@ Each case is a dict with:
 - id: stable case ID
 - invariant_id: "no-domain-leak" or "no-temporary-monitoring"
 - expected_decision: "confirm" or "reject"
+- java_target: "17" or "21"
 - description: human-readable rationale
 - source: Java source string
 - file_path: repository-relative path
@@ -23,6 +24,7 @@ DOMAIN_LEAK_POSITIVE = [
         "id": "dl-pos-001",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "RestController returns @Entity-annotated class",
         "source": (
             "import jakarta.persistence.Entity;\n"
@@ -44,6 +46,7 @@ DOMAIN_LEAK_POSITIVE = [
         "id": "dl-pos-002",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Controller returns List of @Entity type",
         "source": (
             "import jakarta.persistence.Entity;\n"
@@ -66,6 +69,7 @@ DOMAIN_LEAK_POSITIVE = [
         "id": "dl-pos-003",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Controller accepts @Entity type as @RequestBody",
         "source": (
             "import jakarta.persistence.Entity;\n"
@@ -87,6 +91,7 @@ DOMAIN_LEAK_POSITIVE = [
         "id": "dl-pos-004",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "@RequestMapping controller returns Entity-named type",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -100,11 +105,19 @@ DOMAIN_LEAK_POSITIVE = [
         "changed_lines": {5},
         "syntax_features": ["annotations"],
         "expected_evidence_location": 5,
+        "declaration_sources": {
+            "ItemEntity": (
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "class ItemEntity {}\n"
+            ),
+        },
     },
     {
         "id": "dl-pos-005",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Controller returns @MappedSuperclass type",
         "source": (
             "import jakarta.persistence.MappedSuperclass;\n"
@@ -126,6 +139,7 @@ DOMAIN_LEAK_POSITIVE = [
         "id": "dl-pos-006",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "@Controller with @ResponseBody returns persistence type",
         "source": (
             "import jakarta.persistence.Entity;\n"
@@ -149,6 +163,7 @@ DOMAIN_LEAK_POSITIVE = [
         "id": "dl-pos-007",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Multiline method signature returns entity type",
         "source": (
             "import jakarta.persistence.Entity;\n"
@@ -175,6 +190,7 @@ DOMAIN_LEAK_POSITIVE = [
         "id": "dl-pos-008",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Nested controller class leaks entity",
         "source": (
             "import jakarta.persistence.Entity;\n"
@@ -198,6 +214,7 @@ DOMAIN_LEAK_POSITIVE = [
         "id": "dl-pos-009",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "@Embeddable type exposed in controller",
         "source": (
             "import jakarta.persistence.Embeddable;\n"
@@ -219,6 +236,7 @@ DOMAIN_LEAK_POSITIVE = [
         "id": "dl-pos-010",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Naming convention Entity without annotation still detected",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -232,11 +250,19 @@ DOMAIN_LEAK_POSITIVE = [
         "changed_lines": {5},
         "syntax_features": ["annotations"],
         "expected_evidence_location": 5,
+        "declaration_sources": {
+            "ProductEntity": (
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "class ProductEntity {}\n"
+            ),
+        },
     },
     {
         "id": "dl-pos-011",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Aggregate suffix naming convention exposed",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -250,11 +276,19 @@ DOMAIN_LEAK_POSITIVE = [
         "changed_lines": {5},
         "syntax_features": ["annotations"],
         "expected_evidence_location": 5,
+        "declaration_sources": {
+            "ShoppingCartAggregate": (
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "class ShoppingCartAggregate {}\n"
+            ),
+        },
     },
     {
         "id": "dl-pos-012",
         "invariant_id": "no-domain-leak",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "PersistenceModel naming convention exposed in @PutMapping",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -268,6 +302,13 @@ DOMAIN_LEAK_POSITIVE = [
         "changed_lines": {5},
         "syntax_features": ["annotations"],
         "expected_evidence_location": 5,
+        "declaration_sources": {
+            "ConfigPersistenceModel": (
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "class ConfigPersistenceModel {}\n"
+            ),
+        },
     },
 ]
 
@@ -280,6 +321,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-001",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "DTO return type — safe",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -298,6 +340,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-002",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',  # records finalized in Java 16; Java 17 is canonical target
         "description": "Java record used as response — safe",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -317,6 +360,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-003",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Non-controller public method — not a leak",
         "source": (
             "class OrderService {\n"
@@ -332,6 +376,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-004",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "No matching internal type — clean",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -350,6 +395,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-005",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Naming convention DTO — not Entity/Aggregate/PersistenceModel",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -368,13 +414,14 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-006",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
-        "description": "Naming convention Response — safe",
+        'java_target': '17',
+        "description": "DTO with Data suffix — safe, not Entity/Aggregate/PersistenceModel",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
             "@RestController\n"
             "class OrderController {\n"
             "    @GetMapping(\"/orders\")\n"
-            "    public OrderResponse getOrder() { return null; }\n"
+            "    public OrderData getOrder() { return null; }\n"
             "}\n"
         ),
         "file_path": "src/main/java/com/example/OrderController.java",
@@ -386,6 +433,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-007",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Public event class used in controller — explicitly public contract",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -404,6 +452,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-008",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Interface return type — not a concrete entity",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -422,6 +471,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-009",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Void return — no leak",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -440,6 +490,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-010",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Primitive return type — no leak",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -458,6 +509,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-011",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Prompt injection in string literal — must not alter detection",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -477,6 +529,7 @@ DOMAIN_LEAK_NEGATIVE = [
         "id": "dl-neg-012",
         "invariant_id": "no-domain-leak",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Comment containing injection text — must not affect detection",
         "source": (
             "import org.springframework.web.bind.annotation.*;\n"
@@ -504,6 +557,7 @@ TEMP_MONITORING_POSITIVE = [
         "id": "tm-pos-001",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "@Scheduled method with state change",
         "source": (
             "import org.springframework.scheduling.annotation.Scheduled;\n"
@@ -523,6 +577,7 @@ TEMP_MONITORING_POSITIVE = [
         "id": "tm-pos-002",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "ScheduledExecutorService.schedule call",
         "source": (
             "import java.util.concurrent.*;\n"
@@ -542,11 +597,13 @@ TEMP_MONITORING_POSITIVE = [
         "id": "tm-pos-003",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "scheduleAtFixedRate with state change",
         "source": (
             "import java.util.concurrent.*;\n"
             "class PollingService {\n"
             "    void start() {\n"
+            "        ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);\n"
             "        executor.scheduleAtFixedRate(() -> {\n"
             "            checkAndUpdate();\n"
             "            repository.save(state);\n"
@@ -555,14 +612,15 @@ TEMP_MONITORING_POSITIVE = [
             "}\n"
         ),
         "file_path": "src/main/java/com/example/PollingService.java",
-        "changed_lines": {4},
+        "changed_lines": {5},
         "syntax_features": ["lambdas"],
-        "expected_evidence_location": 4,
+        "expected_evidence_location": 5,
     },
     {
         "id": "tm-pos-004",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "while(true) polling with state change",
         "source": (
             "class OrderPoller {\n"
@@ -583,6 +641,7 @@ TEMP_MONITORING_POSITIVE = [
         "id": "tm-pos-005",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "for(;;) infinite polling with state transition",
         "source": (
             "class InfinitePoller {\n"
@@ -604,6 +663,7 @@ TEMP_MONITORING_POSITIVE = [
         "id": "tm-pos-006",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Retry loop with Thread.sleep and state change",
         "source": (
             "class RetryService {\n"
@@ -629,6 +689,7 @@ TEMP_MONITORING_POSITIVE = [
         "id": "tm-pos-007",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Retry loop with TimeUnit sleep and state change",
         "source": (
             "import java.util.concurrent.TimeUnit;\n"
@@ -654,6 +715,7 @@ TEMP_MONITORING_POSITIVE = [
         "id": "tm-pos-008",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "@Scheduled with cron expression and persist",
         "source": (
             "import org.springframework.scheduling.annotation.Scheduled;\n"
@@ -666,33 +728,36 @@ TEMP_MONITORING_POSITIVE = [
             "}\n"
         ),
         "file_path": "src/main/java/com/example/CronMonitor.java",
-        "changed_lines": {4},
+        "changed_lines": {3, 4},
         "syntax_features": ["annotations"],
-        "expected_evidence_location": 4,
+        "expected_evidence_location": 3,
     },
     {
         "id": "tm-pos-009",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "scheduleWithFixedDelay with state flush",
         "source": (
             "import java.util.concurrent.*;\n"
             "class CacheFlusher {\n"
             "    void init() {\n"
+            "        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);\n"
             "        scheduler.scheduleWithFixedDelay(\n"
             "            () -> cache.flush(), 1, 5, TimeUnit.MINUTES);\n"
             "    }\n"
             "}\n"
         ),
         "file_path": "src/main/java/com/example/CacheFlusher.java",
-        "changed_lines": {4},
+        "changed_lines": {5},
         "syntax_features": ["lambdas", "multiline_method_declaration"],
-        "expected_evidence_location": 4,
+        "expected_evidence_location": 5,
     },
     {
         "id": "tm-pos-010",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Thread.sleep with setStatus state change",
         "source": (
             "class StatusRetry {\n"
@@ -717,6 +782,7 @@ TEMP_MONITORING_POSITIVE = [
         "id": "tm-pos-011",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Multiline @Scheduled with fixedRate and emit",
         "source": (
             "import org.springframework.scheduling.annotation.Scheduled;\n"
@@ -731,14 +797,15 @@ TEMP_MONITORING_POSITIVE = [
             "}\n"
         ),
         "file_path": "src/main/java/com/example/EventMonitor.java",
-        "changed_lines": {7},
+        "changed_lines": {3, 7},
         "syntax_features": ["annotations", "multiline_method_declaration"],
-        "expected_evidence_location": 7,
+        "expected_evidence_location": 3,
     },
     {
         "id": "tm-pos-012",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "confirm",
+        'java_target': '17',
         "description": "Nested class with @Scheduled and state change",
         "source": (
             "import org.springframework.scheduling.annotation.Scheduled;\n"
@@ -752,9 +819,9 @@ TEMP_MONITORING_POSITIVE = [
             "}\n"
         ),
         "file_path": "src/main/java/com/example/OuterService.java",
-        "changed_lines": {5},
+        "changed_lines": {4, 7},
         "syntax_features": ["annotations", "nested_classes"],
-        "expected_evidence_location": 5,
+        "expected_evidence_location": 4,
     },
 ]
 
@@ -767,6 +834,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-001",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Documented daily reconciliation job — intentional",
         "source": (
             "import org.springframework.scheduling.annotation.Scheduled;\n"
@@ -787,6 +855,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-002",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Bounded retry with exponential backoff — resilience pattern",
         "source": (
             "class ResilientClient {\n"
@@ -811,6 +880,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-003",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Bounded for loop — not infinite polling",
         "source": (
             "class BatchProcessor {\n"
@@ -830,6 +900,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-004",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Scheduled annotation on a class without a method — no detection",
         "source": (
             "class NotAScheduler {\n"
@@ -847,6 +918,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-005",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "State change without monitoring — not a candidate",
         "source": (
             "class DataService {\n"
@@ -864,6 +936,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-006",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Sleep without state change or loop — not a retry pattern",
         "source": (
             "class Waiter {\n"
@@ -882,6 +955,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-007",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Non-Java file — not evaluated",
         "source": "@Scheduled\nvoid check() { save(); }\n",
         "file_path": "src/main/kotlin/Check.kt",
@@ -893,6 +967,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-008",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Prompt injection in comment — @Scheduled in a comment",
         "source": (
             "class CleanService {\n"
@@ -912,6 +987,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-009",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Prompt injection in string — 'while(true)' in string literal",
         "source": (
             "class SafeCode {\n"
@@ -930,6 +1006,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-010",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "ExecutorService submit (not schedule) — not scheduling",
         "source": (
             "import java.util.concurrent.*;\n"
@@ -948,6 +1025,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-011",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Unchanged file — no changed lines match method range",
         "source": (
             "import org.springframework.scheduling.annotation.Scheduled;\n"
@@ -965,6 +1043,7 @@ TEMP_MONITORING_NEGATIVE = [
         "id": "tm-neg-012",
         "invariant_id": "no-temporary-monitoring",
         "expected_decision": "reject",
+        'java_target': '17',
         "description": "Text block containing code — must not be parsed as code",
         "source": (
             "class TextBlockUser {\n"
@@ -986,9 +1065,90 @@ TEMP_MONITORING_NEGATIVE = [
 # Combined corpus
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Additional required scenarios: renamed file, large patch
+# ---------------------------------------------------------------------------
+
+RENAMED_FILE_CASE = {
+    "id": "dl-pos-013",
+    "invariant_id": "no-domain-leak",
+    "expected_decision": "confirm",
+    'java_target': '17',
+    "description": "Renamed controller file — entity leak must still be detected",
+    "source": (
+        "import jakarta.persistence.Entity;\n"
+        "import org.springframework.web.bind.annotation.*;\n"
+        "@Entity\n"
+        "class PaymentEntity {}\n"
+        "@RestController\n"
+        "class PaymentController {\n"
+        "    @GetMapping(\"/payments\")\n"
+        "    public PaymentEntity getPayment() { return null; }\n"
+        "}\n"
+    ),
+    "file_path": "src/main/java/com/example/PaymentApiController.java",
+    "changed_lines": {8},
+    "syntax_features": ["annotations", "renamed_file"],
+    "expected_evidence_location": 8,
+}
+
+LARGE_PATCH_CASE = {
+    "id": "dl-neg-013",
+    "invariant_id": "no-domain-leak",
+    "expected_decision": "reject",
+    'java_target': '17',
+    "description": "Large patch with clean DTO — coverage handled by engine",
+    "source": (
+        "import org.springframework.web.bind.annotation.*;\n"
+        "@RestController\n"
+        "class LargeController {\n"
+        "    @GetMapping(\"/data\")\n"
+        "    public LargeResponse getData() { return null; }\n"
+        "}\n"
+    ),
+    "file_path": "src/main/java/com/example/LargeController.java",
+    "changed_lines": {5},
+    "syntax_features": ["annotations"],
+    "expected_evidence_location": None,
+}
+
+# ---------------------------------------------------------------------------
+# Genuine Java 21 syntax fixture (P2 finding 6)
+# ---------------------------------------------------------------------------
+
+JAVA21_RECORD_PATTERN_CASE = {
+    "id": "dl-neg-014",
+    "invariant_id": "no-domain-leak",
+    "expected_decision": "reject",
+    'java_target': '21',
+    "description": (
+        "Java 21 record pattern in instanceof — safe DTO, must parse cleanly "
+        "and not produce false candidates"
+    ),
+    "source": (
+        "import org.springframework.web.bind.annotation.*;\n"
+        "@RestController\n"
+        "class RecordPatternController {\n"
+        "    @GetMapping(\"/shape\")\n"
+        "    public String describe(Object shape) {\n"
+        "        record Point(int x, int y) {}\n"
+        "        if (shape instanceof Point(var x, var y)) {\n"
+        "            return x + \",\" + y;\n"
+        "        }\n"
+        "        return \"unknown\";\n"
+        "    }\n"
+        "}\n"
+    ),
+    "file_path": "src/main/java/com/example/RecordPatternController.java",
+    "changed_lines": {7},
+    "syntax_features": ["annotations", "records", "record_pattern"],
+    "expected_evidence_location": None,
+}
+
 ALL_CASES = (
     DOMAIN_LEAK_POSITIVE
     + DOMAIN_LEAK_NEGATIVE
     + TEMP_MONITORING_POSITIVE
     + TEMP_MONITORING_NEGATIVE
+    + [RENAMED_FILE_CASE, LARGE_PATCH_CASE, JAVA21_RECORD_PATTERN_CASE]
 )

@@ -2,9 +2,14 @@ diff --git a/src/main/java/com/example/OrderController.java b/src/main/java/com/
 index 1111111..2222222 100644
 --- a/src/main/java/com/example/OrderController.java
 +++ b/src/main/java/com/example/OrderController.java
-@@ -10,3 +10,6 @@ class OrderController {
-+    public OrderEntity getOrder(String id) {
-+        return service.getOrder(id);
-+    }
- }
-
+@@ -1,0 +2,9 @@
++import jakarta.persistence.Entity;
++import org.springframework.web.bind.annotation.*;
++
++@Entity
++class OrderEntity {}
++@RestController
++class OrderController {
++    @GetMapping("/order")
++    public OrderEntity getOrder(String id) { return null; }
++}

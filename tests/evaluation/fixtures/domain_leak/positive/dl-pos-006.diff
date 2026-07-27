@@ -1,0 +1,14 @@
+--- a/src/main/java/com/example/LegacyController.java
++++ b/src/main/java/com/example/LegacyController.java
+@@ -1,11 +1,11 @@
+ import jakarta.persistence.Entity;
+ import org.springframework.stereotype.Controller;
+ import org.springframework.web.bind.annotation.*;
+ @Entity
+ class OrderPersistenceModel {}
+ @Controller
+ class LegacyController {
+     @GetMapping("/legacy")
+     @ResponseBody
++    public OrderPersistenceModel getLegacy() { return null; }
+ }

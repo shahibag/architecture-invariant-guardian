@@ -7,6 +7,7 @@ tree.  No code from the target repository is ever executed.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import tree_sitter
@@ -32,8 +33,18 @@ def parse_java_source(source: str) -> tree_sitter.Tree:
 
     The caller owns the returned tree and must keep it alive while any
     :class:`tree_sitter.Node` derived from it is in use.
+
+    Raises :class:`ValueError` when the root node contains an ERROR or
+    MISSING node — partial recovery must not produce confirmable structural
+    evidence.
     """
-    return _PARSER.parse(source.encode("utf-8"))
+    tree = _PARSER.parse(source.encode("utf-8"))
+    if tree.root_node.has_error:
+        raise ValueError(
+            "Java parse produced ERROR/MISSING node — "
+            "structural evidence is unreliable"
+        )
+    return tree
 
 
 # ---------------------------------------------------------------------------
@@ -100,10 +111,18 @@ def _annotation_name(
     annotation_node: tree_sitter.Node, source_bytes: bytes
 ) -> str | None:
     """Extract the simple annotation name from a marker_annotation or
-    annotation node."""
+    annotation node.
+
+    Handles unqualified (``@RestController``) and qualified
+    (``@org.springframework.web.bind.annotation.RestController``) forms.
+    """
     for child in annotation_node.children:
         if child.type == "identifier":
             return _node_text(child, source_bytes)
+        if child.type == "scoped_identifier":
+            # Qualified: @org.foo.Bar — the last segment is the simple name
+            text = _node_text(child, source_bytes)
+            return text.rsplit(".", 1)[-1] if "." in text else text
     return None
 
 
@@ -271,14 +290,22 @@ def find_method_calls(
     method_node: tree_sitter.Node,
     target_methods: set[str],
     source_bytes: bytes,
+    receiver_check: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return method invocations in *method_node*'s body whose name is in
     *target_methods*.
 
+    When *receiver_check* is provided, the receiver (object) of the call
+    must be of a type whose name ends with *receiver_check* (e.g.
+    ``"ScheduledExecutorService"``).
+
     Each dict has ``method`` and ``start_line``.
     """
     results: list[dict[str, Any]] = []
-    _collect_method_calls(method_node, target_methods, source_bytes, results)
+    _collect_method_calls(
+        method_node, target_methods, source_bytes, results, receiver_check,
+        method_node,  # pass method context for variable lookup
+    )
     return results
 
 
@@ -287,6 +314,8 @@ def _collect_method_calls(
     target_methods: set[str],
     source_bytes: bytes,
     results: list[dict[str, Any]],
+    receiver_check: str | None = None,
+    method_context: tree_sitter.Node | None = None,
 ) -> None:
     for child in node.children:
         if child.type == "method_invocation":
@@ -294,11 +323,103 @@ def _collect_method_calls(
             if name_node is not None:
                 called = _node_text(name_node, source_bytes)
                 if called in target_methods:
+                    # When receiver_check is specified, verify the receiver
+                    if receiver_check is not None:
+                        obj_node = child.child_by_field_name("object")
+                        receiver_match = _check_receiver(
+                            obj_node, receiver_check, source_bytes,
+                            method_context,
+                        )
+                        if not receiver_match:
+                            continue
                     results.append({
                         "method": called,
                         "start_line": child.start_point[0] + 1,
                     })
-        _collect_method_calls(child, target_methods, source_bytes, results)
+        _collect_method_calls(child, target_methods, source_bytes, results,
+                             receiver_check, method_context)
+
+
+def _check_receiver(
+    obj_node: tree_sitter.Node | None,
+    receiver_check: str,
+    source_bytes: bytes,
+    method_context: tree_sitter.Node | None = None,
+) -> bool:
+    """Check whether *obj_node* is of a type matching *receiver_check*.
+
+    Resolves the receiver type from local-variable, formal parameter,
+    and field declarations within the enclosing method and class.
+    Never relies on variable-name heuristics — the declared type must
+    carry *receiver_check*.
+    """
+    if obj_node is None:
+        return False
+    obj_text = _node_text(obj_node, source_bytes)
+    if method_context is None:
+        return False
+
+    # Collect all declaration sites: local vars, params, and fields
+    candidates: list[tree_sitter.Node] = list(_traverse_all(method_context))
+    # Also traverse up to find the enclosing class body for fields
+    parent = method_context.parent
+    while parent is not None:
+        if parent.type in ("class_body", "enum_body", "record_body", "interface_body"):
+            candidates.extend(_traverse_all(parent))
+            break
+        parent = parent.parent
+
+    for child in candidates:
+        if child.type == "local_variable_declaration":
+            decl_type = child.child_by_field_name("type")
+            if decl_type is not None:
+                type_text = _node_text(decl_type, source_bytes)
+                if type_text.endswith(receiver_check):
+                    declarator = child.child_by_field_name("declarator")
+                    if declarator is not None:
+                        # Use the declarator's name child, not full text
+                        # (which includes the initializer)
+                        name_node = declarator.child_by_field_name("name")
+                        var_name = (
+                            _node_text(name_node, source_bytes)
+                            if name_node else _node_text(declarator, source_bytes)
+                        )
+                        if var_name == obj_text:
+                            return True
+        elif child.type == "formal_parameter":
+            decl_type = child.child_by_field_name("type")
+            if decl_type is not None:
+                type_text = _node_text(decl_type, source_bytes)
+                if type_text.endswith(receiver_check):
+                    name_node = child.child_by_field_name("name")
+                    if name_node is not None:
+                        var_name = _node_text(name_node, source_bytes)
+                        if var_name == obj_text:
+                            return True
+        elif child.type == "field_declaration":
+            decl_type = child.child_by_field_name("type")
+            if decl_type is not None:
+                type_text = _node_text(decl_type, source_bytes)
+                if type_text.endswith(receiver_check):
+                    declarator = child.child_by_field_name("declarator")
+                    if declarator is not None:
+                        name_node = declarator.child_by_field_name("name")
+                        var_name = (
+                            _node_text(name_node, source_bytes)
+                            if name_node else _node_text(declarator, source_bytes)
+                        )
+                        if var_name == obj_text:
+                            return True
+    return False
+
+
+def _traverse_all(node: tree_sitter.Node) -> list[tree_sitter.Node]:
+    """Yield all descendants of *node* (depth-first)."""
+    nodes: list[tree_sitter.Node] = []
+    for child in node.children:
+        nodes.append(child)
+        nodes.extend(_traverse_all(child))
+    return nodes
 
 
 # ---------------------------------------------------------------------------
@@ -359,23 +480,37 @@ def has_sleep_or_backoff(
     method_node: tree_sitter.Node, source_bytes: bytes
 ) -> bool:
     """Return True when the method body contains ``Thread.sleep(...)``
-    or ``TimeUnit.*.sleep(...)`` calls.
+    or ``TimeUnit.*.sleep(...)`` calls inside a loop body (retry pattern).
     """
-    return _search_sleep(method_node, source_bytes)
+    return _search_sleep(method_node, source_bytes, require_loop=True)
 
 
-def _search_sleep(node: tree_sitter.Node, source_bytes: bytes) -> bool:
+def _search_sleep(
+    node: tree_sitter.Node,
+    source_bytes: bytes,
+    require_loop: bool = False,
+    in_loop: bool = False,
+) -> bool:
+    is_loop = node.type in (
+        "for_statement", "while_statement", "do_statement",
+        "enhanced_for_statement",
+    )
+    next_in_loop = in_loop or is_loop
+
     for child in node.children:
         if child.type == "method_invocation":
             name_node = child.child_by_field_name("name")
-            if name_node is not None and _node_text(name_node, source_bytes) == "sleep":
-                obj = child.child_by_field_name("object")
-                if obj is not None:
-                    obj_text = _node_text(obj, source_bytes)
-                    # "Thread.sleep" or "TimeUnit.SECONDS.sleep" etc.
-                    if obj_text == "Thread" or obj_text.startswith("TimeUnit"):
-                        return True
-        if _search_sleep(child, source_bytes):
+            if (
+                name_node is not None
+                and _node_text(name_node, source_bytes) == "sleep"
+                and (not require_loop or next_in_loop)
+            ):
+                    obj = child.child_by_field_name("object")
+                    if obj is not None:
+                        obj_text = _node_text(obj, source_bytes)
+                        if obj_text == "Thread" or obj_text.startswith("TimeUnit"):
+                            return True
+        if _search_sleep(child, source_bytes, require_loop, next_in_loop):
             return True
     return False
 
@@ -448,56 +583,57 @@ def detect_domain_leak_candidates(
     source: str,
     file_path: str,
     changed_lines: set[int],
+    source_reader: Callable[[str], str | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Return domain-leak candidates from *source* using AST facts.
 
     Each candidate is a dict with keys matching :class:`CandidateFinding`
     fields: ``invariant_id``, ``file``, ``start_line``, ``end_line``,
-    ``pattern``, ``evidence``, ``confidence``.
+    ``pattern``, ``evidence``, ``confidence``, and ``related_evidence``.
 
-    Detection logic:
-    1. Find classes with Spring web annotations (RestController, Controller,
-       RequestMapping, etc.)
-    2. For methods in those classes annotated with web mapping annotations,
-       check return types and parameter types for internal-type evidence.
-    3. Internal types are those annotated with JPA annotations (Entity,
-       MappedSuperclass, Embeddable) in the same source, or matching
-       naming conventions (Entity, PersistenceModel, Aggregate).
+    *source_reader* is an optional callable ``(type_name) -> str | None``
+    that resolves type declarations.  When absent, naming-convention-only
+    matches are low confidence (speculative).
+
+    P0 finding 2: Types without internal naming suffixes are resolved via
+    *source_reader* before classification.  A separately declared
+    ``@Entity`` type named ``Order`` is detected; a record, DTO, or
+    non-JPA class is correctly excluded.
     """
     candidates: list[dict[str, Any]] = []
     source_bytes = source.encode("utf-8")
 
     tree = parse_java_source(source)
 
+    declarations = find_class_declarations(tree, source_bytes)
+
     # Build a set of internal types from the source
     internal_types = _build_internal_type_set(tree, source_bytes)
 
+    # Every valid same-file declaration not marked JPA-internal is an
+    # acceptable public/DTO contract, regardless of a misleading suffix.
+    acceptable_names = {d["name"] for d in declarations} - internal_types
+
     # Find controller classes
-    for decl in find_class_declarations(tree, source_bytes):
+    for decl in declarations:
         class_node = decl.get("node")
         if class_node is None:
             continue
 
         # Check if this class is a Spring web controller
         web_anns = find_annotations(class_node, _SPRING_WEB_ANNOTATIONS, source_bytes)
-        # Also check for @RequestMapping on class (makes it a controller)
         has_class_mapping = bool(find_annotations(
             class_node, {"RequestMapping"}, source_bytes
         ))
-        is_controller = bool(web_anns)
+        is_controller = bool(web_anns) or has_class_mapping
 
-        if not is_controller and not has_class_mapping:
-            continue
-
-        # Check methods in this controller
+        # Check methods in this class
         methods = find_method_declarations(class_node, source_bytes)
         for method in methods:
             method_start = method["start_line"]
             method_end = method.get("end_line", method_start)
 
             # A method is "changed" if any changed line falls within its range.
-            # When changed_lines is None, check all methods.
-            # When it's explicitly empty, no method is changed — skip all.
             if changed_lines is not None:
                 method_range = set(range(method_start, method_end + 1))
                 if not changed_lines.intersection(method_range):
@@ -508,60 +644,138 @@ def detect_domain_leak_candidates(
             if method_node_ref is None:
                 continue
 
-            # Check return type
-            ret_type = method["return_type"]
-            ret_type_args = method.get("type_arguments", {}).get("return", [])
-            if _is_internal_type(ret_type, internal_types) or any(
-                _is_internal_type(ta, internal_types) for ta in ret_type_args
-            ):
-                # Find the actual changed line for the evidence location
-                if changed_lines:
-                    changed_in_range = sorted(
-                        changed_lines.intersection(set(range(method_start, method_end + 1)))
-                    )
-                    candidate_line = changed_in_range[0] if changed_in_range else method_start
-                else:
-                    candidate_line = method_start
-                candidates.append({
-                    "invariant_id": "no-domain-leak",
-                    "file": file_path,
-                    "start_line": candidate_line,
-                    "end_line": candidate_line,
-                    "pattern": "public boundary exposes likely internal type",
-                    "evidence": (
-                        f"Method {method['name']} returns {ret_type} "
-                        f"which appears to be an internal domain/persistence type"
-                    ),
-                    "confidence": "medium",
-                })
+            # Public visibility check — only publicly accessible methods
+            # can leak internal types at a public boundary.
+            if not _is_public_method(method_node_ref, source_bytes):
                 continue
 
-            # Check parameter types
+            # Method-level boundary: a method annotated with a web mapping
+            # annotation is a public boundary even when the enclosing class
+            # lacks a controller annotation.
+            if not is_controller:
+                method_web_anns = find_annotations(
+                    method_node_ref, _SPRING_WEB_ANNOTATIONS, source_bytes
+                )
+                if not method_web_anns:
+                    continue
+
+            if changed_lines:
+                changed_in_range = sorted(
+                    changed_lines.intersection(set(range(method_start, method_end + 1)))
+                )
+                candidate_line = changed_in_range[0] if changed_in_range else method_start
+            else:
+                candidate_line = method_start
+
+            # --- Check return type ---
+            ret_type = method["return_type"]
+            ret_type_args = method.get("type_arguments", {}).get("return", [])
+            outcome = _classify_type(ret_type, internal_types, acceptable_names,
+                                     source_reader)
+            # Also check type arguments
+            if outcome == "acceptable":
+                for ta in ret_type_args:
+                    outcome = _classify_type(ta, internal_types, acceptable_names,
+                                             source_reader)
+                    if outcome in ("internal", "unavailable"):
+                        ret_type = ta
+                        break
+
+            if outcome == "internal":
+                _add_domain_leak_candidate(
+                    candidates, file_path, candidate_line,
+                    method["name"], ret_type, "returns",
+                    internal_types, source_reader,
+                )
+                continue
+            if outcome == "unavailable":
+                _add_domain_leak_candidate(
+                    candidates, file_path, candidate_line,
+                    method["name"], ret_type, "returns",
+                    internal_types, source_reader,
+                )
+                continue
+
+            # --- Check parameter types ---
             for param in method.get("parameters", []):
                 ptype = param["type"]
-                if _is_internal_type(ptype, internal_types):
-                    if changed_lines:
-                        changed_in_range = sorted(
-                            changed_lines.intersection(set(range(method_start, method_end + 1)))
-                        )
-                        candidate_line = changed_in_range[0] if changed_in_range else method_start
-                    else:
-                        candidate_line = method_start
-                    candidates.append({
-                        "invariant_id": "no-domain-leak",
-                        "file": file_path,
-                        "start_line": candidate_line,
-                        "end_line": candidate_line,
-                        "pattern": "public boundary exposes likely internal type",
-                        "evidence": (
-                            f"Method {method['name']} accepts {ptype} "
-                            f"which appears to be an internal domain/persistence type"
-                        ),
-                        "confidence": "medium",
-                    })
+                outcome = _classify_type(ptype, internal_types, acceptable_names,
+                                         source_reader)
+                if outcome in ("internal", "unavailable"):
+                    _add_domain_leak_candidate(
+                        candidates, file_path, candidate_line,
+                        method["name"], ptype, "accepts",
+                        internal_types, source_reader,
+                    )
                     break
 
     return candidates
+
+
+def _add_domain_leak_candidate(
+    candidates: list[dict[str, Any]],
+    file_path: str,
+    candidate_line: int,
+    method_name: str,
+    type_name: str,
+    direction: str,
+    internal_types: set[str],
+    source_reader: Callable[[str], str | None] | None,
+) -> None:
+    """Build and append a domain-leak candidate with appropriate confidence.
+
+    Same-file JPA-annotated → medium confidence.
+    Naming-convention with resolved declaration → medium confidence.
+    Naming-convention without resolution → low confidence.
+    """
+    related_evidence: str | None = None
+
+    # Determine confidence level
+    # Strip generic wrappers for matching: "List<OrderEntity>" → "OrderEntity"
+    simple_type = type_name
+    if "<" in simple_type:
+        simple_type = simple_type.split("<", 1)[-1].rstrip(">")
+    if type_name in internal_types or simple_type in internal_types:
+        # Same-file JPA-annotated — confirmed internal
+        confidence = "medium"
+    elif source_reader is not None:
+        # Naming convention or no-suffix — try to resolve and validate.
+        # Use the simple type name (without generics) for resolution.
+        declaration, _ = _resolve_type_from_source(simple_type, source_reader)
+        if declaration is not None and _validate_related_declaration(
+            declaration, type_name
+        ):
+            related_evidence = (
+                f"Declaration of {type_name}:\n{declaration}"
+            )
+            # Truncate declaration to a bounded size
+            max_decl_bytes = 100_000  # MAX_SOURCE_BYTES_PER_FILE
+            decl_bytes = related_evidence.encode("utf-8")
+            if len(decl_bytes) > max_decl_bytes:
+                related_evidence = (
+                    decl_bytes[:max_decl_bytes].decode("utf-8", errors="replace")
+                    + "\n[truncated]"
+                )
+            confidence = "medium"
+        else:
+            confidence = "low"
+    else:
+        confidence = "low"
+
+    candidate: dict[str, Any] = {
+        "invariant_id": "no-domain-leak",
+        "file": file_path,
+        "start_line": candidate_line,
+        "end_line": candidate_line,
+        "pattern": "public boundary exposes likely internal type",
+        "evidence": (
+            f"Method {method_name} {direction} {type_name} "
+            f"which appears to be an internal domain/persistence type"
+        ),
+        "confidence": confidence,
+        "related_evidence": related_evidence,
+    }
+    candidates.append(candidate)
 
 
 def _build_internal_type_set(
@@ -581,19 +795,166 @@ def _build_internal_type_set(
     return internal
 
 
-def _is_internal_type(type_name: str, known_internal: set[str]) -> bool:
-    """Check if *type_name* looks like an internal type."""
+def _is_internal_type(type_name: str, known_internal: set[str]) -> tuple[bool, str | None]:
+    """Check if *type_name* looks like an internal type.
+
+    Returns ``(is_internal, naming_suffix)`` where *naming_suffix* is the
+    matched suffix when the match was via naming convention rather than a
+    known JPA-annotated type.
+    """
     if type_name in known_internal:
-        return True
+        return True, None
     # Strip generic wrapper to check the type argument
     if type_name.endswith(">"):
         # For "List<OrderEntity>" check "OrderEntity"
         inner = type_name.split("<", 1)[-1].rstrip(">")
         if inner in known_internal:
-            return True
+            return True, None
         if inner.endswith(_INTERNAL_TYPE_SUFFIXES):
-            return True
-    return bool(type_name.endswith(_INTERNAL_TYPE_SUFFIXES))
+            for suffix in _INTERNAL_TYPE_SUFFIXES:
+                if inner.endswith(suffix):
+                    return True, suffix
+    for suffix in _INTERNAL_TYPE_SUFFIXES:
+        if type_name.endswith(suffix):
+            return True, suffix
+    return False, None
+
+
+# ---------------------------------------------------------------------------
+# P0 finding 2: typed resolution outcome
+# ---------------------------------------------------------------------------
+
+_ResolutionOutcome = str  # "internal" | "acceptable" | "unavailable"
+
+
+def _classify_type(
+    type_name: str,
+    known_internal: set[str],
+    acceptable_names: set[str],
+    source_reader: Callable[[str], str | None] | None,
+) -> _ResolutionOutcome:
+    """Classify *type_name* as internal, acceptable, or unavailable.
+
+    Resolution order:
+    1. Same-file JPA-annotated declaration → internal.
+    2. Other valid same-file declarations → acceptable.
+    3. With a source reader, resolve and structurally classify the declaration:
+       JPA class → internal; record/enum/interface/non-JPA class → acceptable;
+       missing/malformed/mismatched evidence → unavailable.
+    4. Without a source reader only, retain the legacy suffix heuristic.
+    """
+    simple = type_name.split("<", 1)[-1].rstrip(">").rsplit(".", 1)[-1]
+    if simple in {
+        "void", "boolean", "byte", "short", "int", "long", "float", "double",
+        "char", "String", "Object", "UUID", "BigDecimal", "BigInteger",
+        "List", "Set", "Map", "Collection", "Iterable", "Optional",
+        "ResponseEntity", "HttpStatus",
+    }:
+        return "acceptable"
+
+    # 1 & 2: same-file classification
+    if type_name in known_internal:
+        return "internal"
+    if type_name in acceptable_names or simple in acceptable_names:
+        return "acceptable"
+
+    # Resolve before applying any naming heuristic. A valid DTO/record named
+    # ``*Entity`` is acceptable, while missing or malformed required evidence
+    # is unavailable rather than clean.
+    if source_reader is not None:
+        declaration, _ = _resolve_type_from_source(simple, source_reader)
+        if declaration is None:
+            return "unavailable"
+        try:
+            decl_tree = parse_java_source(declaration)
+        except ValueError:
+            return "unavailable"
+        decl_bytes = declaration.encode("utf-8")
+        decls = find_class_declarations(decl_tree, decl_bytes)
+        for d in decls:
+            if d["name"] != simple:
+                continue
+            kind = d.get("kind", "class")
+            if kind in ("record", "enum", "interface"):
+                return "acceptable"
+            if kind == "class":
+                class_node = d.get("node")
+                if class_node is None:
+                    return "unavailable"
+                jpa_anns = find_annotations(
+                    class_node, _JPA_ENTITY_ANNOTATIONS, decl_bytes
+                )
+                return "internal" if jpa_anns else "acceptable"
+        return "unavailable"
+
+    # Legacy direct/local callers without repository source access retain the
+    # conservative suffix candidate; production Action always supplies a reader.
+    if simple.endswith(_INTERNAL_TYPE_SUFFIXES):
+        return "internal"
+    return "acceptable"
+
+
+def _validate_related_declaration(declaration: str, type_name: str) -> bool:
+    """Validate a related declaration retrieved from a SourceReader.
+
+    The declaration must:
+    1. Parse as valid Java (no ERROR/MISSING nodes)
+    2. Declare *type_name* as a type (class, not record/enum/interface)
+    3. Carry a supported JPA annotation (@Entity, @MappedSuperclass,
+       @Embeddable)
+
+    Returns ``False`` for records, DTOs, events, public contracts,
+    malformed Java, or mismatched type names.
+    """
+    try:
+        tree = parse_java_source(declaration)
+    except ValueError:
+        # Parser error — invalid Java
+        return False
+
+    source_bytes = declaration.encode("utf-8")
+    decls = find_class_declarations(tree, source_bytes)
+
+    for d in decls:
+        if d["name"] != type_name:
+            continue
+        # Must be a class, not record/enum/interface
+        if d.get("kind") != "class":
+            return False
+        # Must have JPA annotation evidence
+        class_node = d.get("node")
+        if class_node is None:
+            return False
+        jpa_anns = find_annotations(
+            class_node, _JPA_ENTITY_ANNOTATIONS, source_bytes
+        )
+        return bool(jpa_anns)
+
+    # Type name not found in the declaration
+    return False
+
+
+def _resolve_type_from_source(
+    type_name: str,
+    source_reader: Callable[[str], str | None] | None,
+) -> tuple[str | None, str | None]:
+    """Try to resolve *type_name*'s declaration via *source_reader*.
+
+    *source_reader* is ``(type_name: str) -> str | None`` — a callable
+    that returns the declaration source for a type name, or None when
+    unresolvable.
+
+    Returns ``(declaration_source, type_name)`` or ``(None, None)``.
+    """
+    if source_reader is None:
+        return None, None
+    try:
+        resolved = source_reader(type_name)
+        if resolved is not None:
+            return resolved, type_name
+    except Exception:  # noqa: BLE001 — source reader is an untrusted boundary
+        return None, None
+    return None, None
 
 
 def _find_method_node(
@@ -609,6 +970,24 @@ def _find_method_node(
             if name_node is not None and _node_text(name_node, source_bytes) == method_name:
                 return child
     return None
+
+
+def _is_public_method(
+    method_node: tree_sitter.Node, source_bytes: bytes
+) -> bool:
+    """Return True when the method declaration has a ``public`` modifier."""
+    modifiers = method_node.child_by_field_name("modifiers")
+    if modifiers is None:
+        for child in method_node.children:
+            if child.type == "modifiers":
+                modifiers = child
+                break
+    if modifiers is None:
+        return False
+    for child in modifiers.children:
+        if child.type == "public":
+            return True
+    return False
 
 
 def detect_monitoring_candidates(
@@ -653,47 +1032,72 @@ def detect_monitoring_candidates(
             if method_node_ref is None:
                 continue
 
-            # Find the actual changed line for evidence location.
-            # When changed_lines is None, default to the method start line.
-            if changed_lines:
-                changed_in_range = sorted(
-                    changed_lines.intersection(set(range(method_start, method_end + 1)))
-                )
-                candidate_line = changed_in_range[0] if changed_in_range else method_start
-            else:
-                candidate_line = method_start
-
-            # 1. @Scheduled methods
+            # 1. @Scheduled methods — only flag when accompanied by
+            # a state-change call (save/update/transition/persist/etc).
+            # @Scheduled alone (e.g. documented daily reconciliation)
+            # is intentional batch work, not temporary monitoring.
+            # The @Scheduled annotation itself must intersect changed
+            # lines — an unchanged @Scheduled with only a state change
+            # added elsewhere is not a monitoring addition.
             sched_anns = find_annotations(
                 method_node_ref, {"Scheduled"}, source_bytes
             )
             if sched_anns:
+                # Verify annotation itself intersects changed lines
+                sched_changed = changed_lines is not None and any(
+                    ann["start_line"] in changed_lines
+                    for ann in sched_anns
+                )
+                if not sched_changed and changed_lines is not None:
+                    # @Scheduled is pre-existing — the structural
+                    # node was not added in this change
+                    continue
                 has_state = has_state_change_in_method(method_node_ref,
                                                        source_bytes)
-                candidates.append({
-                    "invariant_id": "no-temporary-monitoring",
-                    "file": file_path,
-                    "start_line": candidate_line,
-                    "end_line": candidate_line,
-                    "pattern": "scheduled work",
-                    "evidence": (
-                        f"Scheduled method {method['name']} "
-                        + ("with state change" if has_state else "without state change")
-                    ),
-                    "confidence": "high" if has_state else "low",
-                })
+                if has_state:
+                    state_lines = sorted(
+                        _find_state_change_lines(method_node_ref, source_bytes)
+                    )
+                    if not state_lines:
+                        continue
+                    state_line = state_lines[0]
+                    source_line = source.splitlines()[state_line - 1].strip()
+                    candidates.append({
+                        "invariant_id": "no-temporary-monitoring",
+                        "file": file_path,
+                        "start_line": sched_anns[0]["start_line"],
+                        "end_line": state_line,
+                        "pattern": "scheduled work",
+                        "evidence": (
+                            f"Scheduled method {method['name']} "
+                            "with state change"
+                        ),
+                        "confidence": "high",
+                        "related_evidence": (
+                            f"{file_path}:{state_line}: {source_line}"
+                        ),
+                    })
                 continue
 
-            # 2. ScheduledExecutorService calls
+            # 2. ScheduledExecutorService calls — must verify receiver type
+            # and the scheduling call itself must intersect changed lines.
             sched_calls = find_method_calls(
-                method_node_ref, _SCHEDULING_METHODS, source_bytes
+                method_node_ref, _SCHEDULING_METHODS, source_bytes,
+                receiver_check="ScheduledExecutorService",
             )
             if sched_calls:
+                # Verify the scheduling call line is in changed_lines
+                call_changed = changed_lines is not None and any(
+                    c["start_line"] in changed_lines for c in sched_calls
+                )
+                if changed_lines is not None and not call_changed:
+                    # Scheduling call is pre-existing
+                    continue
                 candidates.append({
                     "invariant_id": "no-temporary-monitoring",
                     "file": file_path,
-                    "start_line": candidate_line,
-                    "end_line": candidate_line,
+                    "start_line": sched_calls[0]["start_line"],
+                    "end_line": sched_calls[0]["start_line"],
                     "pattern": "scheduled work",
                     "evidence": (
                         f"Method {method['name']} calls "
@@ -703,43 +1107,96 @@ def detect_monitoring_candidates(
                 })
                 continue
 
-            # 3. Unbounded polling loops with state changes
+            # 3. Unbounded polling loops with state changes.
+            # The loop itself must intersect changed lines.
             unbounded = _find_unbounded_loops(method_node_ref, source_bytes)
             if unbounded:
-                has_sc = has_state_change_in_tree(method_node_ref, source_bytes)
-                if has_sc:
+                for loop_node in unbounded:
+                    loop_start = loop_node.start_point[0] + 1
+                    # Verify the loop itself intersects changed lines
+                    if changed_lines is not None and loop_start not in changed_lines:
+                        continue
+                    has_sc = has_state_change_in_tree(loop_node, source_bytes)
+                    if has_sc:
+                        candidates.append({
+                            "invariant_id": "no-temporary-monitoring",
+                            "file": file_path,
+                            "start_line": loop_start,
+                            "end_line": loop_node.end_point[0] + 1,
+                            "pattern": "state polling",
+                            "evidence": (
+                                f"Method {method['name']} contains an unbounded "
+                                f"polling loop with state-change calls"
+                            ),
+                            "confidence": "medium",
+                        })
+                        break
+
+            # 4. Retry loops with sleep/backoff — only flag when
+            # the sleeping loop ALSO contains a state-change call
+            # within the SAME loop body, AND at least one structural
+            # element (loop opening, qualifying sleep/backoff, or
+            # state-change child) intersects changed lines.
+            # (P1 finding 4: changed-child anchoring)
+            sleep_loops = _find_sleep_loops(method_node_ref, source_bytes)
+            if sleep_loops:
+                for loop_node in sleep_loops:
+                    loop_start = loop_node.start_point[0] + 1
+                    loop_end = loop_node.end_point[0] + 1
+                    has_sc = has_state_change_in_tree(loop_node, source_bytes)
+                    if not has_sc:
+                        continue
+                    sleep_hits = _find_sleep_lines(loop_node, source_bytes)
+                    sc_hits = _find_state_change_lines(loop_node, source_bytes)
+                    anchor_line = loop_start
+                    # Accept when the loop opening itself is changed OR
+                    # a qualifying child (sleep/state-change) within the
+                    # loop is newly changed. Anchor on that changed child.
+                    if changed_lines is not None:
+                        qualifying = {loop_start} | sleep_hits | sc_hits
+                        changed_qualifying = qualifying & changed_lines
+                        if not changed_qualifying:
+                            continue
+                        anchor_line = min(changed_qualifying)
                     candidates.append({
                         "invariant_id": "no-temporary-monitoring",
                         "file": file_path,
-                        "start_line": candidate_line,
-                        "end_line": candidate_line,
-                        "pattern": "state polling",
+                        "start_line": anchor_line,
+                        "end_line": anchor_line,
+                        "pattern": "wait retry",
                         "evidence": (
-                            f"Method {method['name']} contains an unbounded "
-                            f"polling loop with state-change calls"
+                            f"Method {method['name']} contains sleep/backoff "
+                            "with state-change in the same retry loop"
                         ),
-                        "confidence": "medium",
+                        "confidence": "high",
+                        "related_evidence": (
+                            f"Enclosing retry loop lines {loop_start}-{loop_end}; "
+                            f"sleep lines {sorted(sleep_hits)}; "
+                            f"state-change lines {sorted(sc_hits)}"
+                        ),
                     })
-                    continue
-
-            # 4. Retry loops with sleep/backoff
-            has_sleep = has_sleep_or_backoff(method_node_ref, source_bytes)
-            if has_sleep:
-                has_sc = has_state_change_in_tree(method_node_ref, source_bytes)
-                candidates.append({
-                    "invariant_id": "no-temporary-monitoring",
-                    "file": file_path,
-                    "start_line": candidate_line,
-                    "end_line": candidate_line,
-                    "pattern": "wait retry",
-                    "evidence": (
-                        f"Method {method['name']} contains sleep/backoff"
-                        + (" with state-change calls" if has_sc else "")
-                    ),
-                    "confidence": "high" if has_sc else "low",
-                })
+                    break
 
     return candidates
+
+
+def _find_sleep_loops(
+    node: tree_sitter.Node, source_bytes: bytes
+) -> list[tree_sitter.Node]:
+    """Find loops (for, while, do) that contain Thread.sleep or
+    TimeUnit.*.sleep calls within their body.
+
+    Returns the loop nodes (not the sleep nodes), so the caller can
+    verify that state changes also reside in the same loop.
+    """
+    results: list[tree_sitter.Node] = []
+    for child in node.children:
+        if child.type in ("for_statement", "while_statement", "do_statement") and (
+            _search_sleep(child, source_bytes, require_loop=False, in_loop=True)
+        ):
+            results.append(child)
+        results.extend(_find_sleep_loops(child, source_bytes))
+    return results
 
 
 def _find_unbounded_loops(
@@ -753,6 +1210,40 @@ def _find_unbounded_loops(
         ):
             results.append(child)
         results.extend(_find_unbounded_loops(child, source_bytes))
+    return results
+
+
+def _find_sleep_lines(
+    node: tree_sitter.Node, source_bytes: bytes
+) -> set[int]:
+    """Return line numbers of Thread.sleep/TimeUnit.*.sleep calls in *node*."""
+    results: set[int] = set()
+    for child in node.children:
+        if child.type == "method_invocation":
+            name_node = child.child_by_field_name("name")
+            if name_node is not None and _node_text(name_node, source_bytes) == "sleep":
+                obj = child.child_by_field_name("object")
+                if obj is not None:
+                    obj_text = _node_text(obj, source_bytes)
+                    if obj_text == "Thread" or obj_text.startswith("TimeUnit"):
+                        results.add(child.start_point[0] + 1)
+        results.update(_find_sleep_lines(child, source_bytes))
+    return results
+
+
+def _find_state_change_lines(
+    node: tree_sitter.Node, source_bytes: bytes
+) -> set[int]:
+    """Return line numbers of state-change calls in *node*."""
+    results: set[int] = set()
+    for child in node.children:
+        if child.type == "method_invocation":
+            name_node = child.child_by_field_name("name")
+            if name_node is not None:
+                called = _node_text(name_node, source_bytes)
+                if called in _STATE_CHANGE_PATTERNS:
+                    results.add(child.start_point[0] + 1)
+        results.update(_find_state_change_lines(child, source_bytes))
     return results
 
 

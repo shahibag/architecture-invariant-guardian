@@ -1,0 +1,9 @@
+--- a/src/main/java/com/example/AsyncWorker.java
++++ b/src/main/java/com/example/AsyncWorker.java
+@@ -1,6 +1,6 @@
+ import java.util.concurrent.*;
+ class AsyncWorker {
+     void work() {
++        executor.submit(() -> doWork());
+     }
+ }
