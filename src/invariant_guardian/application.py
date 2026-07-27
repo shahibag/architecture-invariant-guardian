@@ -16,6 +16,7 @@ from invariant_guardian.context import (
 from invariant_guardian.domain.models import (
     Assessment,
     AssessmentStatus,
+    CandidateFinding,
     ChangedFile,
     Coverage,
     JudgeCandidate,
@@ -26,7 +27,12 @@ from invariant_guardian.domain.models import (
 )
 from invariant_guardian.invariants import load_invariants
 from invariant_guardian.prompt import judge_message_chars
-from invariant_guardian.rules.java import detect_candidates
+from invariant_guardian.rules.java import (
+    detect_candidates,
+    detect_candidates_from_source,
+    extract_changed_lines_from_patch,
+    reconstruct_source_from_patch,
+)
 
 if TYPE_CHECKING:
     from invariant_guardian.ports import LLMJudge
@@ -78,7 +84,7 @@ class ReviewEngine:
             )
 
         # --- detect candidates from in-scope, evaluable files ---------------
-        candidates = []
+        candidates: list[CandidateFinding] = []
         # Map file → patch for bounded context extraction
         file_patches: dict[str, str] = {}
         for cf in changed_files[:MAX_CHANGED_FILES]:
@@ -107,8 +113,28 @@ class ReviewEngine:
                 continue
             normalised = _normalize_patch(cf.patch, norm)
             file_patches[norm] = normalised
-            # Only enable detectors for invariants whose scope includes this file
-            candidates.extend(detect_candidates(normalised, in_scope_ids))
+            # Phase 2: reconstruct Java source from the patch and use
+            # AST-based detection for structural accuracy.
+            # Phase 1 regex detection runs as a fallback when the patch
+            # lacks enough context for AST parsing, or when AST errors.
+            if norm.endswith(".java"):
+                ast_findings: list[CandidateFinding] = []
+                try:
+                    source = reconstruct_source_from_patch(cf.patch)
+                    changed_lines = extract_changed_lines_from_patch(cf.patch)
+                    ast_findings = detect_candidates_from_source(
+                        source, norm, changed_lines, in_scope_ids
+                    )
+                except Exception:  # noqa: BLE001 — AST must never crash the engine
+                    ast_findings = []
+                if ast_findings:
+                    candidates.extend(ast_findings)
+                else:
+                    # Fall back to regex when AST yields nothing — the patch
+                    # may lack enough context for structural detection.
+                    candidates.extend(detect_candidates(normalised, in_scope_ids))
+            else:
+                candidates.extend(detect_candidates(normalised, in_scope_ids))
 
         # Apply candidate count limit
         if len(candidates) > MAX_CANDIDATE_COUNT:

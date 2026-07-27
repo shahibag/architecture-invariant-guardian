@@ -1,0 +1,20 @@
+{
+  "no-domain-leak": {
+    "total": 24,
+    "true_positives": 12,
+    "false_positives": 0,
+    "true_negatives": 12,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "no-temporary-monitoring": {
+    "total": 24,
+    "true_positives": 12,
+    "false_positives": 0,
+    "true_negatives": 12,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0
+  }
+}
