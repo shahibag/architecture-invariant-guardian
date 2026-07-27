@@ -15,7 +15,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3,<9"]
+dev = [
+  "mypy>=1.17,<2",
+  "pytest>=8.3,<9",
+  "ruff>=0.12,<1",
+  "types-PyYAML>=6.0,<7",
+]
 
 [project.scripts]
 invariant-guardian = "invariant_guardian.cli:main"

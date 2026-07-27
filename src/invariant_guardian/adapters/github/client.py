@@ -9,6 +9,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from invariant_guardian.domain.models import ChangedFile
 from invariant_guardian.rendering.comment import MARKER_PREFIX
 
 BOT_LOGIN = "github-actions[bot]"
@@ -62,12 +63,44 @@ class GitHubClient:
             accept="application/vnd.github.v3.diff",
         ).decode("utf-8")
 
+    def changed_files(self) -> list[ChangedFile]:
+        """Fetch the PR file listing from the GitHub REST API.
+
+        Each file includes its per-file patch (bounded by GitHub).  No
+        checkout or execution of PR code is performed.
+        """
+        raw = self._json(
+            f"{self._base}/pulls/{self._pull_number}/files?per_page=100"
+        )
+        if not isinstance(raw, list):
+            return []
+        result: list[ChangedFile] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            filename = entry.get("filename", "")
+            if not isinstance(filename, str) or not filename:
+                continue
+            status = entry.get("status", "modified")
+            if status not in ("added", "modified", "removed", "renamed"):
+                status = "modified"
+            patch = entry.get("patch")
+            result.append(
+                ChangedFile(
+                    path=filename,
+                    status=status,  # type: ignore[arg-type]
+                    patch=patch if isinstance(patch, str) else None,
+                    patch_complete=True,
+                )
+            )
+        return result
+
     def write_invariants(self, destination: Path, ref: str, directory: str) -> None:
         listing = self._json(
             f"{self._base}/contents/{directory.lstrip('/')}?ref={ref}"
         )
         if not isinstance(listing, list):
-            raise ValueError(f"{directory} is not a directory in the base repository")
+            raise TypeError(f"{directory} is not a directory in the base repository")
         destination.mkdir(parents=True, exist_ok=True)
         for entry in listing:
             if entry.get("type") != "file" or not entry.get("name", "").endswith(".md"):

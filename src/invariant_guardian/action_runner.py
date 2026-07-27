@@ -9,8 +9,14 @@ from tempfile import TemporaryDirectory
 
 from invariant_guardian.adapters.github.client import GitHubClient
 from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
-from invariant_guardian.application import assess_diff
-from invariant_guardian.domain.models import Assessment, AssessmentStatus, SafeWarning
+from invariant_guardian.application import ReviewEngine
+from invariant_guardian.domain.models import (
+    Assessment,
+    AssessmentStatus,
+    Coverage,
+    ReviewRequest,
+    SafeWarning,
+)
 from invariant_guardian.invariants import load_invariants
 from invariant_guardian.rendering.comment import fingerprint, render_comment
 
@@ -45,12 +51,26 @@ def run() -> int:
     pull_request = event.get("pull_request")
     if not pull_request:
         raise RuntimeError("Invariant Guardian supports pull_request events only")
+
+    # --- fork PR: assessment_incomplete with all declared outputs -----------
     if pull_request["head"]["repo"].get("fork"):
-        print(json.dumps({"status": "assessment_incomplete", "reason": "fork PR"}))
+        assessment = Assessment(
+            status=AssessmentStatus.INCOMPLETE,
+            coverage=Coverage(),
+            warnings=[
+                SafeWarning(
+                    category="fork",
+                    message="Fork PRs are not assessed for architecture invariants.",
+                ),
+            ],
+        )
+        _write_action_outputs(assessment)
+        print(json.dumps(assessment.model_dump(mode="json")))
         return 0
 
     client = GitHubClient(token, event["repository"]["full_name"], event["number"])
     with TemporaryDirectory(prefix="invariant-guardian-") as temp:
+        # --- load invariants ------------------------------------------------
         invariant_dir = Path(temp) / "invariants"
         client.write_invariants(
             invariant_dir,
@@ -58,13 +78,23 @@ def run() -> int:
             os.environ.get("INPUT_INVARIANT-PATH", ".guardian/invariants"),
         )
         invariants, warnings = load_invariants(invariant_dir)
-        diff = client.pull_diff()
-        assessment = assess_diff(invariant_dir, diff)
-        assessment.warnings.extend(
-            SafeWarning(category="load", message=w) for w in warnings
+
+        # --- fetch changed files via SourceReader (GitHub files endpoint) ---
+        changed_files = client.changed_files()
+
+        # --- build request & assess via engine ------------------------------
+        engine = ReviewEngine()
+        request = ReviewRequest(
+            base_sha=pull_request["base"]["sha"],
+            head_sha=pull_request["head"]["sha"],
+            invariants=invariants,
+            changed_files=changed_files,
         )
+
+        # --- wire the judge when credentials are available ------------------
         api_key = os.environ.get("INPUT_LLM-API-KEY") or os.environ.get("LLM_API_KEY")
-        if assessment.candidates and api_key:
+        judge = None
+        if api_key:
             judge = OpenAICompatibleJudge(
                 api_key=api_key,
                 model=(
@@ -78,22 +108,15 @@ def run() -> int:
                     or "https://api.deepseek.com"
                 ),
             )
-            assessment = judge.confirm(invariants, assessment.candidates, diff)
-            # The judge now returns INCOMPLETE on failure with safe warnings
-            # instead of raising, so the raw-exception catch is no longer needed.
-        elif assessment.candidates:
-            assessment = Assessment(
-                status=AssessmentStatus.INCOMPLETE,
-                coverage=assessment.coverage,
-                warnings=[
-                    *assessment.warnings,
-                    SafeWarning(
-                        category="provider_unavailable",
-                        message="AI evidence judgment skipped because no compatible-provider API key was available.",
-                    ),
-                ],
-            )
 
+        assessment = engine.assess(request, judge=judge)
+
+        # --- merge load-time warnings ---------------------------------------
+        assessment.warnings.extend(
+            SafeWarning(category="load", message=w) for w in warnings
+        )
+
+        # --- publish ---------------------------------------------------------
         key = fingerprint(assessment, pull_request["head"]["sha"])
         client.publish(render_comment(assessment, invariants, key), key)
         _write_action_outputs(assessment)

@@ -114,6 +114,51 @@ class ReviewRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# v0.2 bounded judge contract — no unbounded diff reaches the provider
+# ---------------------------------------------------------------------------
+
+
+class JudgeCandidate(BaseModel):
+    """A single candidate finding packaged for provider judgment.
+
+    Only the bounded *context_hunk* (not the full diff) reaches the provider.
+    """
+
+    index: int = Field(ge=0)
+    invariant_id: str
+    invariant_text: str = Field(min_length=1)
+    file: str
+    start_line: int
+    end_line: int
+    evidence: str = Field(min_length=1)
+    context_hunk: str = Field(min_length=1)
+
+
+class JudgeDecision(BaseModel):
+    """Provider judgment on a single candidate."""
+
+    candidate_index: int = Field(ge=0)
+    decision: Literal["confirm", "reject"]
+    why_it_matters: str = Field(max_length=600)
+    suggested_direction: str = Field(max_length=600)
+
+
+class JudgeRequest(BaseModel):
+    """Bounded provider request — never carries an unbounded full diff."""
+
+    candidates: list[JudgeCandidate] = Field(default_factory=list)
+
+
+class JudgeResult(BaseModel):
+    """Provider judgment result with usage metadata."""
+
+    decisions: list[JudgeDecision] = Field(default_factory=list)
+    provider_usage: ProviderUsage | None = None
+    truncated: bool = False
+    errors: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Warning coercion helper — allows old str warnings alongside new SafeWarning
 # ---------------------------------------------------------------------------
 

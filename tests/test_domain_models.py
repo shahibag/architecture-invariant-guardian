@@ -11,6 +11,10 @@ from invariant_guardian.domain.models import (
     CoverageGap,
     Invariant,
     InvariantScope,
+    JudgeCandidate,
+    JudgeDecision,
+    JudgeRequest,
+    JudgeResult,
     ProviderUsage,
     ReviewRequest,
     SafeWarning,
@@ -171,3 +175,61 @@ class TestAssessmentStatus:
         assert "assessment_incomplete" in values
         assert "no_confirmed_violations" in values
         assert "confirmed_violations" in values
+
+
+# ---------------------------------------------------------------------------
+# JudgeRequest / JudgeResult — bounded provider contract (Defect 3)
+# ---------------------------------------------------------------------------
+class TestJudgeContract:
+    def test_judge_candidate_construction(self) -> None:
+        jc = JudgeCandidate(
+            index=0,
+            invariant_id="no-domain-leak",
+            invariant_text="Do not leak entities.\nRationale: stability.",
+            file="src/Foo.java",
+            start_line=10,
+            end_line=10,
+            evidence="public OrderEntity get()",
+            context_hunk="@@ -10,3 +10,6 @@\n+    public OrderEntity getOrder() {",
+        )
+        assert jc.index == 0
+        assert jc.invariant_text is not None
+        assert len(jc.context_hunk) > 0
+
+    def test_judge_request_no_full_diff(self) -> None:
+        req = JudgeRequest(
+            candidates=[
+                JudgeCandidate(
+                    index=0,
+                    invariant_id="no-domain-leak",
+                    invariant_text="Rule text",
+                    file="src/Foo.java",
+                    start_line=10,
+                    end_line=10,
+                    evidence="evidence",
+                    context_hunk="hunk",
+                )
+            ]
+        )
+        # JudgeRequest must NOT have a "diff" field
+        assert not hasattr(req, "diff")
+
+    def test_judge_result_with_usage(self) -> None:
+        result = JudgeResult(
+            decisions=[
+                JudgeDecision(
+                    candidate_index=0,
+                    decision="confirm",
+                    why_it_matters="Entity leaks.",
+                    suggested_direction="Use DTO.",
+                )
+            ],
+            provider_usage=ProviderUsage(model="test", prompt_version="v2"),
+        )
+        assert len(result.decisions) == 1
+        assert result.provider_usage is not None
+        assert result.truncated is False
+
+    def test_judge_result_truncated(self) -> None:
+        result = JudgeResult(decisions=[], truncated=True)
+        assert result.truncated is True

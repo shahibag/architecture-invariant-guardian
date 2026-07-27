@@ -2,17 +2,23 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal, cast
 
 from openai import APIStatusError, APITimeoutError, AuthenticationError, OpenAI
 from pydantic import BaseModel, Field, ValidationError
 
+from invariant_guardian.context import CONTEXT_LINES
 from invariant_guardian.domain.models import (
     Assessment,
     AssessmentStatus,
     CandidateFinding,
     Coverage,
     Invariant,
+    JudgeCandidate,
+    JudgeDecision,
+    JudgeRequest,
+    JudgeResult,
+    ProviderUsage,
     SafeWarning,
     Violation,
 )
@@ -152,6 +158,10 @@ class OpenAICompatibleJudge:
 
     Includes request timeout, one retry for transient failures, strict
     output validation, and safe error classification (spec §9).
+
+    The primary entry-point is :meth:`evaluate` which accepts a bounded
+    :class:`~invariant_guardian.domain.models.JudgeRequest` — no unbounded
+    full diff ever reaches the provider.
     """
 
     def __init__(
@@ -169,26 +179,206 @@ class OpenAICompatibleJudge:
             max_retries=0,  # we implement our own retry policy
         )
 
+    # ------------------------------------------------------------------
+    # Primary entry-point — bounded evaluate contract
+    # ------------------------------------------------------------------
+
+    def evaluate(self, request: JudgeRequest) -> JudgeResult:
+        """Judge the candidates in *request* using only bounded context hunks.
+
+        No unbounded full diff is ever sent to the provider.
+        """
+        if not request.candidates:
+            return JudgeResult(decisions=[])
+
+        messages = self._build_messages(request)
+
+        failure: ProviderFailure | None = None
+
+        for _attempt in (1, 2):
+            try:
+                output, input_tokens, output_tokens = self._call_provider(messages)
+            except AuthenticationError:
+                failure = ProviderFailure.AUTHENTICATION_ERROR
+                break
+            except APITimeoutError as exc:
+                failure = classify_failure(None, str(exc))
+                if failure not in _RETRYABLE_FAILURES:
+                    break
+                continue
+            except APIStatusError as exc:
+                failure = classify_failure(str(exc.status_code), str(exc))
+                if failure not in _RETRYABLE_FAILURES:
+                    break
+                continue
+            except ValidationError:
+                failure = ProviderFailure.INVALID_RESPONSE
+                break
+            except Exception as exc:  # noqa: BLE001 — safe catch-all
+                failure = classify_failure(None, str(exc))
+                if failure not in _RETRYABLE_FAILURES:
+                    break
+                continue
+
+            # --- success: validate output ---
+            validation_errors = validate_decisions(
+                output, len(request.candidates)
+            )
+            if validation_errors:
+                failure = ProviderFailure.INVALID_RESPONSE
+                break
+
+            # --- build result ---
+            decisions = [
+                JudgeDecision(
+                    candidate_index=d.candidate_index,
+                    decision=d.decision,
+                    why_it_matters=d.why_it_matters,
+                    suggested_direction=d.suggested_direction,
+                )
+                for d in output.decisions
+            ]
+            return JudgeResult(
+                decisions=decisions,
+                provider_usage=ProviderUsage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    model=self._model,
+                    prompt_version=PROMPT_VERSION,
+                ),
+            )
+
+        # --- failure path ---
+        assert failure is not None
+        return JudgeResult(
+            decisions=[],
+            truncated=True,
+            errors=[safe_failure_message(failure)],
+        )
+
+    # ------------------------------------------------------------------
+    # Legacy confirm — backward-compatible wrapper (CLI assess_diff)
+    # ------------------------------------------------------------------
+
     def confirm(
         self,
         invariants: list[Invariant],
         candidates: list[CandidateFinding],
         diff: str,
     ) -> Assessment:
-        """Legacy entry-point preserved for backward compatibility.
+        """Legacy entry-point preserved for CLI backward compatibility.
 
-        New callers should use :meth:`evaluate`.
+        Converts the old (invariants, candidates, diff) arguments into a
+        bounded :class:`JudgeRequest`, delegates to :meth:`evaluate`, then
+        converts the :class:`JudgeResult` back to an :class:`Assessment`.
+
+        New callers should use the engine + evaluate path instead.
         """
-        return self._confirm_impl(invariants, candidates, diff)
+        if not candidates:
+            return Assessment(
+                status=AssessmentStatus.NO_CONFIRMED_VIOLATIONS,
+                coverage=Coverage(),
+            )
+
+        # Build bounded JudgeRequest from legacy args
+        invariant_map: dict[str, Invariant] = {inv.id: inv for inv in invariants}
+        judge_candidates: list[JudgeCandidate] = []
+        for i, c in enumerate(candidates):
+            inv = invariant_map.get(c.invariant_id)
+            invariant_text = (
+                f"Rule: {inv.rule}\nRationale: {inv.rationale}"
+                if inv
+                else f"Rule: {c.invariant_id}"
+            )
+            # Extract bounded context from the diff for this candidate. If the
+            # legacy caller supplied no parseable per-file hunk, fall back to
+            # the already-bounded candidate evidence rather than unrelated
+            # whole-diff content.
+            context_hunk = (
+                _extract_bounded_context(diff, c.file, c.start_line) or c.evidence
+            )
+            judge_candidates.append(
+                JudgeCandidate(
+                    index=i,
+                    invariant_id=c.invariant_id,
+                    invariant_text=invariant_text,
+                    file=c.file,
+                    start_line=c.start_line,
+                    end_line=c.end_line,
+                    evidence=c.evidence,
+                    context_hunk=context_hunk,
+                )
+            )
+
+        request = JudgeRequest(candidates=judge_candidates)
+        result = self.evaluate(request)
+
+        # Convert JudgeResult → Assessment for backward compat
+        if result.truncated or result.errors:
+            return Assessment(
+                status=AssessmentStatus.INCOMPLETE,
+                coverage=Coverage(context_truncated=result.truncated),
+                warnings=[
+                    SafeWarning(
+                        category="provider_failure",
+                        message=err,
+                    )
+                    for err in result.errors
+                ] or [
+                    SafeWarning(
+                        category="provider_failure",
+                        message="AI judgment was unavailable.",
+                    )
+                ],
+            )
+
+        violations: list[Violation] = []
+        for d in result.decisions:
+            if d.decision == "confirm":
+                c = candidates[d.candidate_index]
+                violations.append(
+                    Violation(
+                        **c.model_dump(),
+                        why_it_matters=d.why_it_matters,
+                        suggested_direction=d.suggested_direction,
+                    )
+                )
+
+        return Assessment(
+            status=(
+                AssessmentStatus.CONFIRMED_VIOLATIONS
+                if violations
+                else AssessmentStatus.NO_CONFIRMED_VIOLATIONS
+            ),
+            violations=violations,
+            coverage=Coverage(),
+            provider_usage=result.provider_usage,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_messages(
-        invariants: list[Invariant], candidates: list[CandidateFinding], diff: str
-    ) -> list[dict[str, str]]:
+    def _build_messages(request: JudgeRequest) -> list[dict[str, str]]:
+        """Build provider messages from a bounded JudgeRequest.
+
+        Only the candidate-specific bounded context hunks are included —
+        no unbounded full diff.
+        """
+        candidates_data = [
+            {
+                "index": jc.index,
+                "invariant_id": jc.invariant_id,
+                "invariant_text": jc.invariant_text,
+                "file": jc.file,
+                "line": f"{jc.start_line}-{jc.end_line}",
+                "evidence": jc.evidence,
+                "context_hunk": jc.context_hunk,
+            }
+            for jc in request.candidates
+        ]
+
         return [
             {
                 "role": "system",
@@ -218,13 +408,7 @@ class OpenAICompatibleJudge:
                                 }
                             ]
                         },
-                        "invariants": [
-                            invariant.model_dump(mode="json") for invariant in invariants
-                        ],
-                        "candidates": [
-                            candidate.model_dump(mode="json") for candidate in candidates
-                        ],
-                        "diff": diff,
+                        "candidates": candidates_data,
                     }
                 ),
             },
@@ -239,8 +423,8 @@ class OpenAICompatibleJudge:
         """
         response = self._client.chat.completions.create(
             model=self._model,
-            messages=messages,
-            response_format={"type": "json_object"},
+            messages=cast(Any, messages),
+            response_format=cast(Any, {"type": "json_object"}),
             max_tokens=1200,
             temperature=0,
         )
@@ -255,95 +439,52 @@ class OpenAICompatibleJudge:
         output = JudgeOutput.model_validate_json(content)
         return output, input_tokens, output_tokens
 
-    def _confirm_impl(
-        self,
-        invariants: list[Invariant],
-        candidates: list[CandidateFinding],
-        diff: str,
-    ) -> Assessment:
-        if not candidates:
-            return Assessment(
-                status=AssessmentStatus.NO_CONFIRMED_VIOLATIONS,
-                coverage=Coverage(),
-            )
 
-        messages = self._build_messages(invariants, candidates, diff)
+# ---------------------------------------------------------------------------
+# Bounded context extraction (for legacy confirm compat)
+# ---------------------------------------------------------------------------
 
-        failure: ProviderFailure | None = None
+_CONTEXT_LINES = CONTEXT_LINES
 
-        for _attempt in (1, 2):
-            try:
-                output, _input_tokens, _output_tokens = self._call_provider(messages)
-            except AuthenticationError:
-                failure = ProviderFailure.AUTHENTICATION_ERROR
-                break  # never retry auth failures
-            except APITimeoutError as exc:
-                failure = classify_failure(None, str(exc))
-                if failure not in _RETRYABLE_FAILURES:
-                    break
-                continue  # retry
-            except APIStatusError as exc:
-                failure = classify_failure(str(exc.status_code), str(exc))
-                if failure not in _RETRYABLE_FAILURES:
-                    break
-                continue  # retry
-            except ValidationError:
-                failure = ProviderFailure.INVALID_RESPONSE
-                break  # never retry schema failures
-            except Exception as exc:  # noqa: BLE001 — safe catch-all for unexpected errors
-                failure = classify_failure(None, str(exc))
-                if failure not in _RETRYABLE_FAILURES:
-                    break
-                continue  # retry
 
-            # --- success: validate output ---
-            validation_errors = validate_decisions(
-                output, len(candidates)
-            )
-            if validation_errors:
-                failure = ProviderFailure.INVALID_RESPONSE
-                break  # never retry schema failures
+def _extract_bounded_context(diff: str, target_file: str, target_line: int) -> str:
+    """Extract a bounded diff hunk around *target_line* in *target_file*.
 
-            # --- build result ---
-            violations = self._violations(candidates, output)
-            return Assessment(
-                status=(
-                    AssessmentStatus.CONFIRMED_VIOLATIONS
-                    if violations
-                    else AssessmentStatus.NO_CONFIRMED_VIOLATIONS
-                ),
-                violations=violations,
-                coverage=Coverage(),
-            )
+    Returns at most the lines around the target plus ``_CONTEXT_LINES`` of
+    surrounding context — never the full diff.
+    """
+    lines: list[str] = []
+    current_file: str | None = None
+    new_line: int | None = None
 
-        # --- failure path ---
-        assert failure is not None
-        return Assessment(
-            status=AssessmentStatus.INCOMPLETE,
-            coverage=Coverage(context_truncated=True),
-            warnings=[
-                SafeWarning(
-                    category=failure.value,
-                    message=safe_failure_message(failure),
-                )
-            ],
-        )
+    for line in diff.splitlines():
+        if line.startswith("+++ b/"):
+            current_file = line.removeprefix("+++ b/")
+            new_line = None
+            continue
+        if current_file != target_file:
+            continue
+        if line.startswith("@@"):
+            match = __import__("re").search(r"\+(\d+)", line)
+            new_line = int(match.group(1)) if match else None
+            # Always include hunk headers
+            lines.append(line)
+            continue
+        if new_line is None:
+            continue
 
-    @staticmethod
-    def _violations(
-        candidates: list[CandidateFinding], output: JudgeOutput
-    ) -> list[Violation]:
-        violations: list[Violation] = []
-        for decision in output.decisions:
-            if decision.decision == "confirm":
-                violations.append(
-                    Violation(
-                        **candidates[decision.candidate_index].model_dump(),
-                        why_it_matters=decision.why_it_matters,
-                        suggested_direction=decision.suggested_direction,
-                    )
-                )
-        return violations
+        # Include lines within CONTEXT_LINES of target
+        if abs(new_line - target_line) <= _CONTEXT_LINES:
+            lines.append(line)
+
+        if (
+            line.startswith("+") and not line.startswith("+++")
+        ) or line.startswith(" "):
+            new_line += 1
+
+    # Never fall back to unrelated whole-diff content when the candidate file
+    # or line cannot be located.
+    return "\n".join(lines)
 
 
 OpenAIJudge = OpenAICompatibleJudge

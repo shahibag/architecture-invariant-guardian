@@ -30,4 +30,8 @@ def test_action_runner_skips_forked_pull_requests(
     monkeypatch.setenv("INPUT_GITHUB-TOKEN", "test-token")
 
     assert run() == 0
-    assert json.loads(capsys.readouterr().out)["reason"] == "fork PR"
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "assessment_incomplete"
+    assert len(output["warnings"]) >= 1
+    assert any("fork" in w["category"].lower() or "fork" in w["message"].lower()
+               for w in output["warnings"])

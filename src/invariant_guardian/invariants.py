@@ -34,14 +34,16 @@ def _parse_invariant(path: Path) -> Invariant:
         raise ValueError("missing YAML front matter")
     metadata = yaml.safe_load(match.group(1))
     if not isinstance(metadata, dict):
-        raise ValueError("front matter must be a mapping")
+        raise TypeError("front matter must be a mapping")
     sections = _sections(match.group(2))
     missing = [title for title in REQUIRED_SECTIONS if title not in sections]
     if missing:
         raise ValueError(f"missing required section(s): {', '.join(missing)}")
-    return Invariant(
-        **metadata,
-        **{field: sections[title] for title, field in REQUIRED_SECTIONS.items()},
+    return Invariant.model_validate(
+        {
+            **metadata,
+            **{field: sections[title] for title, field in REQUIRED_SECTIONS.items()},
+        }
     )
 
 

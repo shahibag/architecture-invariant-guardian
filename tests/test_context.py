@@ -1,5 +1,7 @@
 """Test scope enforcement and context-budget behaviour."""
 
+import pytest
+
 from invariant_guardian.context import (
     CONTEXT_LINES,
     MAX_CANDIDATE_COUNT,
@@ -7,6 +9,7 @@ from invariant_guardian.context import (
     MAX_MODEL_CONTEXT_CHARS,
     MAX_PATCH_BYTES,
     MAX_SOURCE_BYTES_PER_FILE,
+    _validate_include_paths,
     build_coverage,
     is_in_scope,
     normalize_path,
@@ -24,8 +27,9 @@ from invariant_guardian.domain.models import (
 # Path normalisation
 # ---------------------------------------------------------------------------
 class TestNormalizePath:
-    def test_removes_leading_slash(self) -> None:
-        assert normalize_path("/src/main/java/Foo.java") == "src/main/java/Foo.java"
+    def test_rejects_absolute_path(self) -> None:
+        with pytest.raises(ValueError, match="absolute"):
+            normalize_path("/src/main/java/Foo.java")
 
     def test_removes_dot_slash(self) -> None:
         assert normalize_path("./src/main/java/Foo.java") == "src/main/java/Foo.java"
@@ -38,6 +42,21 @@ class TestNormalizePath:
 
     def test_empty_path(self) -> None:
         assert normalize_path("") == ""
+
+    def test_traversal_escape_rejected(self) -> None:
+        """A path that escapes the repository root with .. must be rejected."""
+        with pytest.raises(ValueError, match="traversal"):
+            normalize_path("../../etc/passwd")
+
+    def test_traversal_disguised_as_normalization_rejected(self) -> None:
+        """Path traversal that os.path.normpath resolves but still has ..
+        segments after normalisation must be rejected."""
+        with pytest.raises(ValueError, match="traversal"):
+            normalize_path("src/../../../etc/passwd")
+
+    def test_null_byte_rejected_before_normalization(self) -> None:
+        with pytest.raises(ValueError, match="null"):
+            normalize_path("src/\x00evil.java")
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +115,53 @@ class TestIsInScope:
         # Absolute path
         assert not is_in_scope("/etc/hostname", inv)
 
+    # --- multiple languages ---
+
+    def test_handles_all_scope_languages_not_just_first(self) -> None:
+        """When an invariant declares multiple languages, a file matching
+        any of the supported languages should be in scope.  Previously
+        only languages[0] was checked, so java-as-second-language failed."""
+        inv = self._inv(languages=["kotlin", "java"], include_paths=["src/**"])
+        # Java is second in the list but must still match
+        assert is_in_scope("src/main/java/Foo.java", inv)
+        # Kotlin is not yet supported in Phase 1, so it won't match
+        assert not is_in_scope("src/main/kotlin/Foo.kt", inv)
+
+    def test_second_language_also_used(self) -> None:
+        """A file matching the second listed language must be in scope."""
+        inv = self._inv(languages=["python", "java"], include_paths=["src/**"])
+        assert is_in_scope("src/main/java/Foo.java", inv)
+
+
+# ---------------------------------------------------------------------------
+# Validate include_path globs — meaningful rejection of malformed patterns
+# ---------------------------------------------------------------------------
+class TestValidateIncludePaths:
+    def test_valid_glob_accepted(self) -> None:
+        """Well-formed glob patterns should pass validation."""
+        _validate_include_paths(["src/**", "src/main/java/**/*.java"])
+
+    def test_unclosed_bracket_rejected(self) -> None:
+        """fnmatch.translate may accept [unclosed but our validator must not."""
+        with pytest.raises(ValueError, match="invalid"):
+            _validate_include_paths(["src/[unclosed"])
+
+    def test_empty_string_rejected(self) -> None:
+        with pytest.raises(ValueError, match="invalid"):
+            _validate_include_paths([""])
+
+    def test_absolute_path_rejected(self) -> None:
+        with pytest.raises(ValueError, match="invalid"):
+            _validate_include_paths(["/etc/passwd"])
+
+    def test_traversal_path_rejected(self) -> None:
+        with pytest.raises(ValueError, match="invalid"):
+            _validate_include_paths(["../../etc/passwd"])
+
+    def test_null_byte_rejected(self) -> None:
+        with pytest.raises(ValueError, match="invalid"):
+            _validate_include_paths(["src/\x00evil"])
+
 
 # ---------------------------------------------------------------------------
 # Context budgets (constants present and reasonable)
@@ -152,7 +218,9 @@ class TestBuildCoverage:
         assert set(cov.evaluated_files) == {"src/main/java/Foo.java", "src/main/java/Bar.java"}
         assert cov.skipped_files == []
 
-    def test_non_java_file_skipped(self) -> None:
+    def test_non_java_file_ignored_not_gap(self) -> None:
+        """Out-of-scope files (e.g. non-Java) must not be coverage gaps —
+        they are silently excluded from coverage tracking."""
         inv = Invariant(
             id="test",
             title="Test",
@@ -166,9 +234,9 @@ class TestBuildCoverage:
         files = [self._java("README.md")]
         cov = build_coverage([inv], files)
         assert cov.evaluated_files == []
-        assert len(cov.skipped_files) == 1
-        assert cov.skipped_files[0].file == "README.md"
-        assert "scope" in cov.skipped_files[0].reason.lower()
+        # Out-of-scope files are NOT coverage gaps
+        assert cov.skipped_files == []
+        assert cov.context_truncated is False
 
     def test_truncated_patch_recorded(self) -> None:
         inv = Invariant(

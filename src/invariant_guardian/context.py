@@ -33,16 +33,33 @@ def normalize_path(path: str) -> str:
     """Normalise a repository-relative POSIX path.
 
     Removes leading slashes, dot segments, and resolves ``..`` safely.
+
+    Raises ValueError for input that cannot be normalised to a safe
+    repository-relative path (null bytes, traversal that escapes the
+    repository root).
     """
+    if "\x00" in path:
+        raise ValueError(f"unsafe path {path!r}: null byte")
+
     if not path:
         return ""
-    # Strip leading ./ or /
-    cleaned = path.lstrip("/")
+    # Repository paths must be relative. Reject absolute paths before any
+    # cleanup can accidentally turn them into apparently safe relative paths.
+    if _ABSOLUTE_PATH_RE.match(path):
+        raise ValueError(f"unsafe path {path!r}: absolute")
+    # Strip a harmless leading ./ only.
+    cleaned = path
     cleaned = cleaned.removeprefix("./")
     if not cleaned:
         return ""
     # Resolve .. segments via os.path.normpath, then force POSIX slashes
     cleaned = os.path.normpath(cleaned)
+    # After normalisation a safe path must not start with .. (escape) or
+    # be an absolute filesystem path.
+    if cleaned.startswith("..") and (len(cleaned) == 2 or cleaned[2] in ("/", "\\")):
+        raise ValueError(f"unsafe path {path!r}: traversal escapes repository root")
+    if _ABSOLUTE_PATH_RE.match(cleaned):
+        raise ValueError(f"unsafe path {path!r}: absolute")
     return cleaned.replace("\\", "/")
 
 
@@ -55,21 +72,39 @@ _LANGUAGE_EXTENSIONS: dict[str, list[str]] = {
 }
 
 
-def _validate_include_paths(paths: list[str]) -> None:
-    """Raise ValueError if any include_path glob is syntactically invalid.
+_ABSOLUTE_PATH_RE = re.compile(r"^(/[^/]+|[A-Za-z]:[/\\])")
+_TRAVERSAL_RE = re.compile(r"(?:^|[/\\])\.\.[/\\]")
+_UNBALANCED_BRACKET_RE = re.compile(r"\[[^]]*$")
 
-    We use :func:`fnmatch.translate` as a lightweight validity check;
-    a broken pattern raises ``re.error``.
+
+def _validate_include_paths(paths: list[str]) -> None:
+    """Raise ValueError if any include_path glob is unsafe or malformed.
+
+    Checks performed (before :func:`fnmatch.translate` can mask problems):
+    - non-empty
+    - no null bytes
+    - no absolute paths
+    - no path traversal (``..``)
+    - balanced ``[...]`` character classes
+    - compiles as valid regex after fnmatch.translate
     """
     for p in paths:
+        if not p:
+            raise ValueError(f"invalid scope include_path {p!r}: empty pattern")
+        if "\x00" in p:
+            raise ValueError(f"invalid scope include_path {p!r}: null byte")
+        if _ABSOLUTE_PATH_RE.match(p):
+            raise ValueError(f"invalid scope include_path {p!r}: absolute path")
+        if _TRAVERSAL_RE.search(p):
+            raise ValueError(f"invalid scope include_path {p!r}: path traversal")
+        if _UNBALANCED_BRACKET_RE.search(p):
+            raise ValueError(
+                f"invalid scope include_path {p!r}: unbalanced bracket"
+            )
         try:
             re.compile(_fnmatch.translate(p))
         except re.error as exc:
             raise ValueError(f"invalid scope include_path {p!r}: {exc}") from exc
-
-
-_ABSOLUTE_PATH_RE = re.compile(r"^(/[^/]+|[A-Za-z]:[/\\])")
-_TRAVERSAL_RE = re.compile(r"(?:^|[/\\])\.\.[/\\]")
 
 
 def is_in_scope(file_path: str, invariant: Invariant) -> bool:
@@ -85,13 +120,13 @@ def is_in_scope(file_path: str, invariant: Invariant) -> bool:
     # Validate the invariant's path patterns
     _validate_include_paths(invariant.scope.include_paths)
 
-    # Language check
-    extensions = _LANGUAGE_EXTENSIONS.get(
-        invariant.scope.languages[0] if invariant.scope.languages else "", []
-    )
-    if not extensions:
+    # Language check — must match at least one of the listed languages
+    all_extensions: list[str] = []
+    for lang in invariant.scope.languages:
+        all_extensions.extend(_LANGUAGE_EXTENSIONS.get(lang, []))
+    if not all_extensions:
         return False
-    if not any(file_path.endswith(ext) for ext in extensions):
+    if not any(file_path.endswith(ext) for ext in all_extensions):
         return False
 
     # Path-scope check: at least one include_path glob must match
@@ -125,10 +160,10 @@ def build_coverage(
     for cf in changed_files:
         norm = normalize_path(cf.path)
 
-        # Check scope against any invariant
+        # Check scope against any invariant — out-of-scope files are silently
+        # excluded from coverage (they are not gaps).
         in_any_scope = any(is_in_scope(norm, inv) for inv in invariants)
         if not in_any_scope:
-            skipped.append(CoverageGap(file=norm, reason="excluded by scope"))
             continue
 
         if not cf.patch_complete:

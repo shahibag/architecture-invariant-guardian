@@ -74,9 +74,9 @@ class TestReviewEngineAssess:
         # No invariants → no files in scope → coverage gaps → INCOMPLETE
         assert result.status == AssessmentStatus.INCOMPLETE
 
-    def test_assess_incomplete_when_out_of_scope_cannot_be_evaluated(self) -> None:
-        """When the only Java file is out of scope, coverage records the skip,
-        but the assessment should still produce something safe."""
+    def test_assess_out_of_scope_file_not_gap(self) -> None:
+        """When the only Java file is out of scope, coverage tracks no gaps
+        because out-of-scope files are silently excluded."""
         inv = Invariant(
             id="no-domain-leak",
             title="No domain leak",
@@ -102,9 +102,10 @@ class TestReviewEngineAssess:
         engine = ReviewEngine()
         result = engine.assess(req)
         assert result.coverage.evaluated_files == []
-        assert len(result.coverage.skipped_files) >= 1
-        # At least one Java file couldn't be evaluated, so INCOMPLETE
-        assert result.status == AssessmentStatus.INCOMPLETE
+        # Out-of-scope — not a coverage gap
+        assert len(result.coverage.skipped_files) == 0
+        # No gaps → not INCOMPLETE
+        assert result.status != AssessmentStatus.INCOMPLETE
 
     def test_assess_truncated_patch_yields_incomplete(self) -> None:
         inv = Invariant(
@@ -161,7 +162,8 @@ class TestReviewEngineAssess:
         engine = ReviewEngine()
         result = engine.assess(req)
         assert result.candidates == []
-        assert len(result.coverage.skipped_files) >= 1
+        # Out-of-scope files are not coverage gaps
+        assert result.coverage.skipped_files == []
 
 
 # ---------------------------------------------------------------------------
@@ -192,3 +194,243 @@ class TestAssessDiffBackwardCompat:
         )
         assert assessment.candidates[0].invariant_id == "no-domain-leak"
         assert isinstance(assessment.coverage, Coverage)
+
+
+# ---------------------------------------------------------------------------
+# In-memory adapters for engine tests
+# ---------------------------------------------------------------------------
+
+import json
+from types import SimpleNamespace
+
+
+class FakeJudgeResponses:
+    def __init__(self, output: dict) -> None:
+        self._output = output
+        self.request: dict | None = None
+
+    def create(self, **kwargs):
+        self.request = kwargs
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(self._output))
+                )
+            ],
+            usage=None,
+        )
+
+
+class FakeOpenAI:
+    def __init__(self, output: dict) -> None:
+        self.chat = SimpleNamespace(completions=FakeJudgeResponses(output))
+
+
+# ---------------------------------------------------------------------------
+# Engine with judge — full evaluate flow
+# ---------------------------------------------------------------------------
+class TestEngineWithJudge:
+    def test_engine_with_judge_confirms_violation(self) -> None:
+        from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
+
+        inv = Invariant(
+            id="no-domain-leak",
+            title="No domain leak",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="Do not leak entities.",
+            rationale="Public contracts should remain stable.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+        cf = ChangedFile(
+            path="src/main/java/Foo.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/Foo.java\n"
+                "@@ -10,0 +11,3 @@\n"
+                "+    public OrderEntity getOrder() { return null; }"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[inv],
+            changed_files=[cf],
+        )
+
+        # Create judge that confirms the candidate
+        fake_client = FakeOpenAI(
+            {
+                "decisions": [
+                    {
+                        "candidate_index": 0,
+                        "decision": "confirm",
+                        "why_it_matters": "Entity leaks.",
+                        "suggested_direction": "Use DTO.",
+                    }
+                ]
+            }
+        )
+        judge = OpenAICompatibleJudge("unused", client=fake_client)
+
+        engine = ReviewEngine()
+        result = engine.assess(req, judge=judge)
+
+        assert result.status == AssessmentStatus.CONFIRMED_VIOLATIONS
+        assert len(result.violations) == 1
+        assert result.violations[0].invariant_id == "no-domain-leak"
+        # Coverage must be preserved
+        assert isinstance(result.coverage, Coverage)
+        assert result.coverage.evaluated_files == ["src/main/java/Foo.java"]
+
+    def test_engine_with_judge_rejects_candidate(self) -> None:
+        """Judge rejects a candidate that was detected by regex — candidate
+        preserved but no violation."""
+        from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
+
+        inv = Invariant(
+            id="no-domain-leak",
+            title="No domain leak",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="Rule",
+            rationale="Rationale",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+        cf = ChangedFile(
+            path="src/main/java/Foo.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/Foo.java\n"
+                "@@ -10,0 +11,3 @@\n"
+                "+    public OrderEntity getOrder() { return null; }"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[inv],
+            changed_files=[cf],
+        )
+
+        # Judge rejects the candidate
+        fake_client = FakeOpenAI(
+            {
+                "decisions": [
+                    {
+                        "candidate_index": 0,
+                        "decision": "reject",
+                        "why_it_matters": "Not a real leak.",
+                        "suggested_direction": "",
+                    }
+                ]
+            }
+        )
+        judge = OpenAICompatibleJudge("unused", client=fake_client)
+        engine = ReviewEngine()
+        result = engine.assess(req, judge=judge)
+
+        assert result.status == AssessmentStatus.NO_CONFIRMED_VIOLATIONS
+        assert result.violations == []
+        # Candidates preserved even though judge rejected
+        assert len(result.candidates) == 1
+        assert isinstance(result.coverage, Coverage)
+
+    def test_engine_with_judge_incomplete_on_failure(self) -> None:
+        from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
+
+        inv = Invariant(
+            id="no-domain-leak",
+            title="No domain leak",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="Rule",
+            rationale="Rationale",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+        cf = ChangedFile(
+            path="src/main/java/Foo.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/Foo.java\n"
+                "@@ -10,0 +11,3 @@\n"
+                "+    public OrderEntity getOrder() { return null; }"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[inv],
+            changed_files=[cf],
+        )
+
+        # Malformed provider output
+        fake_client = FakeOpenAI({"unexpected": True})
+        judge = OpenAICompatibleJudge("unused", client=fake_client)
+        engine = ReviewEngine()
+        result = engine.assess(req, judge=judge)
+
+        # Should be INCOMPLETE but still preserve coverage and candidates
+        assert result.status == AssessmentStatus.INCOMPLETE
+        assert isinstance(result.coverage, Coverage)
+        assert len(result.candidates) >= 1  # candidates preserved
+        assert result.coverage.context_truncated is True
+
+    def test_engine_with_judge_no_full_diff_sent(self) -> None:
+        from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
+
+        inv = Invariant(
+            id="no-domain-leak",
+            title="No domain leak",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="Rule",
+            rationale="Rationale",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+        cf = ChangedFile(
+            path="src/main/java/Foo.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/Foo.java\n"
+                "@@ -10,0 +11,3 @@\n"
+                "+    public OrderEntity getOrder() { return null; }"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[inv],
+            changed_files=[cf],
+        )
+
+        fake_client = FakeOpenAI(
+            {
+                "decisions": [
+                    {
+                        "candidate_index": 0,
+                        "decision": "reject",
+                        "why_it_matters": "Fine.",
+                        "suggested_direction": "",
+                    }
+                ]
+            }
+        )
+        judge = OpenAICompatibleJudge("unused", client=fake_client)
+        engine = ReviewEngine()
+        engine.assess(req, judge=judge)
+
+        # The provider request must NOT contain a "diff" key
+        sent = fake_client.chat.completions.request
+        assert sent is not None, "Provider was never called"
+        user_content = json.loads(sent["messages"][1]["content"])
+        assert "diff" not in user_content
+        assert "candidates" in user_content
