@@ -939,3 +939,84 @@ class TestRecoveryBudgetEnforcement:
         )
         assert result.status == AssessmentStatus.INCOMPLETE
         assert "secret provider detail" not in str(result.warnings)
+
+    def test_non_judge_result_values_are_incomplete_not_clean_or_crashing(self) -> None:
+        class BadJudge:
+            def __init__(self, value) -> None:
+                self.value = value
+
+            def evaluate(self, request):
+                return self.value
+
+        changed = ChangedFile(
+            path="src/Foo.java",
+            status="modified",
+            patch="@@ -1 +1 @@\n+public OrderEntity leaked() {}",
+        )
+        request = ReviewRequest(
+            base_sha="a",
+            head_sha="b",
+            invariants=[self._invariant()],
+            changed_files=[changed],
+        )
+        for value in (None, {"decisions": []}):
+            result = ReviewEngine().assess(request, judge=BadJudge(value))
+            assert result.status == AssessmentStatus.INCOMPLETE
+            assert result.coverage.context_truncated is True
+
+    def test_exact_provider_message_content_respects_model_ceiling(self) -> None:
+        from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
+        from invariant_guardian.context import MAX_MODEL_CONTEXT_CHARS
+        from invariant_guardian.domain.models import JudgeDecision, JudgeResult
+
+        class MeasuringJudge:
+            called = False
+
+            def evaluate(self, request):
+                self.called = True
+                messages = OpenAICompatibleJudge._build_messages(request)
+                assert sum(len(m["content"]) for m in messages) <= MAX_MODEL_CONTEXT_CHARS
+                return JudgeResult(
+                    decisions=[
+                        JudgeDecision(
+                            candidate_index=0,
+                            decision="reject",
+                            why_it_matters="",
+                            suggested_direction="",
+                        )
+                    ]
+                )
+
+        inv = self._invariant().model_copy(update={"rule": "r" * 59_000})
+        changed = ChangedFile(
+            path="src/Foo.java",
+            status="modified",
+            patch="@@ -1 +1 @@\n+public OrderEntity leaked() {}",
+        )
+        judge = MeasuringJudge()
+        result = ReviewEngine().assess(
+            ReviewRequest(
+                base_sha="a",
+                head_sha="b",
+                invariants=[inv],
+                changed_files=[changed],
+            ),
+            judge=judge,
+        )
+        assert result.status == AssessmentStatus.INCOMPLETE
+        assert result.coverage.context_truncated is True
+        assert judge.called is False
+
+    def test_context_extractor_has_one_total_limit_across_nearby_hunks(self) -> None:
+        from invariant_guardian.application import _extract_bounded_context
+
+        patch = "\n".join(
+            part
+            for hunk in range(4)
+            for part in [
+                f"@@ -0,0 +{90 + hunk},50 @@",
+                *[f"+near {hunk}-{line}" for line in range(50)],
+            ]
+        )
+        context = _extract_bounded_context(patch, 100)
+        assert len(context.splitlines()) <= 82

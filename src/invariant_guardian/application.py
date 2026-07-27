@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,6 +25,7 @@ from invariant_guardian.domain.models import (
     SafeWarning,
 )
 from invariant_guardian.invariants import load_invariants
+from invariant_guardian.prompt import judge_message_chars
 from invariant_guardian.rules.java import detect_candidates
 
 if TYPE_CHECKING:
@@ -156,12 +156,7 @@ class ReviewEngine:
                 # of all candidates accumulated so far.  If adding this
                 # candidate would breach the ceiling, stop here.
                 trial = [*judge_candidates, jc]
-                trial_size = len(
-                    json.dumps(
-                        [t.model_dump(mode="json") for t in trial],
-                        ensure_ascii=False,
-                    )
-                )
+                trial_size = judge_message_chars(JudgeRequest(candidates=trial))
                 if trial_size > MAX_MODEL_CONTEXT_CHARS:
                     if judge_candidates:
                         # Truncate — record the gap
@@ -204,6 +199,15 @@ class ReviewEngine:
                         SafeWarning(
                             category="provider_failure",
                             message="Provider judgment failed; human review is required.",
+                        )
+                    )
+                    judge_result = None
+                if not isinstance(judge_result, JudgeResult):
+                    coverage.context_truncated = True
+                    warnings.append(
+                        SafeWarning(
+                            category="provider_failure",
+                            message="Provider returned an invalid judgment result.",
                         )
                     )
                     judge_result = None
@@ -324,12 +328,14 @@ def _extract_bounded_context(patch: str, target_line: int) -> str:
     hunk_lines: list[str] = []
     new_line: int | None = None
     max_body_lines = 2 * _CONTEXT_LINES + 1
+    max_total_lines = max_body_lines + 1
 
     def _flush_hunk() -> None:
         nonlocal header, hunk_lines
-        if header is not None and hunk_lines:
+        remaining = max_total_lines - len(selected)
+        if header is not None and hunk_lines and remaining > 1:
             selected.append(header)
-            selected.extend(hunk_lines[:max_body_lines])
+            selected.extend(hunk_lines[: remaining - 1])
         header = None
         hunk_lines = []
 

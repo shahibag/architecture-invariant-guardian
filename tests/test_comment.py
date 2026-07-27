@@ -83,7 +83,7 @@ class TestCoverageRendering:
         key = fingerprint(assessment, "abc123")
         comment = render_comment(assessment, [INVARIANT], key)
 
-        assert "provider_unavailable" in comment.lower()
+        assert "provider\\_unavailable" in comment.lower()
         # Never render raw exception text
         assert "traceback" not in comment.lower()
 
@@ -254,3 +254,15 @@ def test_fingerprint_changes_when_assessment_changes() -> None:
     )
     incomplete = Assessment(status=AssessmentStatus.INCOMPLETE, coverage=Coverage())
     assert fingerprint(clean, "sha") != fingerprint(incomplete, "sha")
+
+
+def test_comment_neutralizes_emphasis_and_bare_urls() -> None:
+    assessment = Assessment(
+        status=AssessmentStatus.INCOMPLETE,
+        coverage=Coverage(context_truncated=True),
+        warnings=["**TRUST ME** https://evil.example www.evil.example"],
+    )
+    comment = render_comment(assessment, [], "key")
+    assert "**TRUST ME**" not in comment
+    assert "https://evil.example" not in comment
+    assert "www.evil.example" not in comment

@@ -22,7 +22,7 @@ def load_invariants(directory: Path) -> tuple[list[Invariant], list[str]]:
     for path in sorted(directory.glob("*.md")):
         try:
             invariants.append(_parse_invariant(path))
-        except (ValueError, yaml.YAMLError) as error:
+        except (TypeError, ValueError, yaml.YAMLError) as error:
             warnings.append(f"{path.name}: {error}")
     return invariants, warnings
 

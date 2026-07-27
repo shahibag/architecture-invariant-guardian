@@ -224,3 +224,18 @@ class TestEvaluateContract:
         assert "diff" not in user_content
         # Must have candidates instead
         assert "candidates" in user_content
+
+
+def test_legacy_context_extractor_has_one_total_limit() -> None:
+    from invariant_guardian.adapters.openai.judge import _extract_bounded_context
+
+    patch = "+++ b/src/Foo.java\n" + "\n".join(
+        part
+        for hunk in range(4)
+        for part in [
+            f"@@ -0,0 +{90 + hunk},50 @@",
+            *[f"+near {hunk}-{line}" for line in range(50)],
+        ]
+    )
+    context = _extract_bounded_context(patch, "src/Foo.java", 100)
+    assert len(context.splitlines()) <= 82

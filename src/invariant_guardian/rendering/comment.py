@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 from invariant_guardian.domain.models import (
     Assessment,
@@ -17,21 +18,27 @@ from invariant_guardian.domain.models import (
 
 MARKER_PREFIX = "<!-- invariant-guardian:v2:"
 
-# Characters that can introduce active Markdown when supplied by untrusted
-# input (source code, provider output, warnings).  We backslash-escape them
-# so they render literally.
-# Only the subset of Markdown-active characters that can create security-
-# relevant constructs (links, images, inline HTML).  Emphasis markers
-# (*, _) are deliberately NOT escaped — untrusted bold/italic cannot
-# create links, inject scripts, or misrepresent the assessment outcome.
-_MARKDOWN_ACTIVE_RE = __import__("re").compile(r"([\\`\[\]<>!#|])")
+# Characters that can introduce active or misleading Markdown when supplied by
+# untrusted input (source code, provider output, warnings). Backslash-escape
+# formatting punctuation and separately neutralize mentions and bare URLs.
+_MARKDOWN_ACTIVE_RE = re.compile(r"([\\`\[\]<>!#|*_~])")
+_BARE_URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)")
 
 
 def _sanitize_markdown(text: str) -> str:
     """Escape characters that could form active Markdown in untrusted text."""
     single_line = text.replace("\r", " ").replace("\n", " ")
     escaped = _MARKDOWN_ACTIVE_RE.sub(r"\\\1", single_line)
-    return escaped.replace("@", "&#64;")
+    without_mentions = escaped.replace("@", "&#64;")
+
+    def _neutralize_url(match: re.Match[str]) -> str:
+        value = match.group(0)
+        if value.lower().startswith("www."):
+            return f"{value[:3]}&#46;"
+        scheme = value.split(":", 1)[0]
+        return f"{scheme}&#58;//"
+
+    return _BARE_URL_RE.sub(_neutralize_url, without_mentions)
 
 
 def _warning_text(warning: SafeWarning | str) -> str:
