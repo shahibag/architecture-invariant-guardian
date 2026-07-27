@@ -7,7 +7,7 @@ from typing import Any, Literal, cast
 from openai import APIStatusError, APITimeoutError, AuthenticationError, OpenAI
 from pydantic import BaseModel, Field, ValidationError
 
-from invariant_guardian.context import CONTEXT_LINES
+from invariant_guardian.context import CONTEXT_LINES, MAX_MODEL_CONTEXT_CHARS
 from invariant_guardian.domain.models import (
     Assessment,
     AssessmentStatus,
@@ -22,7 +22,7 @@ from invariant_guardian.domain.models import (
     SafeWarning,
     Violation,
 )
-from invariant_guardian.prompt import build_judge_messages
+from invariant_guardian.prompt import build_judge_messages, judge_message_chars
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -191,6 +191,16 @@ class OpenAICompatibleJudge:
         """
         if not request.candidates:
             return JudgeResult(decisions=[])
+
+        # Defense in depth: every public adapter entry point, including the
+        # legacy confirm wrapper, must enforce the exact model-visible budget
+        # even when callers bypass ReviewEngine.
+        if judge_message_chars(request) > MAX_MODEL_CONTEXT_CHARS:
+            return JudgeResult(
+                decisions=[],
+                truncated=True,
+                errors=["Model context exceeded the safe request limit."],
+            )
 
         messages = self._build_messages(request)
 

@@ -239,3 +239,34 @@ def test_legacy_context_extractor_has_one_total_limit() -> None:
     )
     context = _extract_bounded_context(patch, "src/Foo.java", 100)
     assert len(context.splitlines()) <= 82
+
+
+def test_adapter_rejects_oversized_messages_before_provider_call() -> None:
+    direct_client = FakeClient({"decisions": []})
+    direct_judge = OpenAICompatibleJudge("unused", client=direct_client)
+    request = JudgeRequest(
+        candidates=[
+            JudgeCandidate(
+                index=0,
+                invariant_id="no-domain-leak",
+                invariant_text="r" * 60_000,
+                file=CANDIDATE.file,
+                start_line=10,
+                end_line=10,
+                evidence=CANDIDATE.evidence,
+                context_hunk=CANDIDATE.evidence,
+            )
+        ]
+    )
+    result = direct_judge.evaluate(request)
+    assert result.truncated is True
+    assert result.errors
+    assert direct_client.chat.completions.request is None
+
+    legacy_client = FakeClient({"decisions": []})
+    legacy_judge = OpenAICompatibleJudge("unused", client=legacy_client)
+    huge_invariant = INVARIANT.model_copy(update={"rule": "r" * 60_000})
+    assessment = legacy_judge.confirm([huge_invariant], [CANDIDATE], "diff")
+    assert assessment.status == AssessmentStatus.INCOMPLETE
+    assert assessment.coverage.context_truncated is True
+    assert legacy_client.chat.completions.request is None
