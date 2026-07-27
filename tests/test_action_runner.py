@@ -1,11 +1,9 @@
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from invariant_guardian.action_runner import run
-from invariant_guardian.domain.models import AssessmentStatus
 
 
 def test_action_runner_rejects_non_pull_request_events(

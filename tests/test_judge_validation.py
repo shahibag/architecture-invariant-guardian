@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from invariant_guardian.adapters.openai.judge import (
     OPENAI_TIMEOUT,
@@ -22,7 +23,6 @@ from invariant_guardian.domain.models import (
     InvariantScope,
     Severity,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -158,7 +158,7 @@ class TestValidateDecisions:
         decisions = [
             {"candidate_index": 0, "decision": "maybe", "why_it_matters": "A", "suggested_direction": ""},
         ]
-        with pytest.raises(Exception):  # Pydantic validation
+        with pytest.raises(ValidationError):
             JudgeOutput(decisions=decisions)
 
 

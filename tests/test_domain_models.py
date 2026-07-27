@@ -6,7 +6,6 @@ from pydantic import ValidationError
 from invariant_guardian.domain.models import (
     Assessment,
     AssessmentStatus,
-    CandidateFinding,
     ChangedFile,
     Coverage,
     CoverageGap,
@@ -16,7 +15,6 @@ from invariant_guardian.domain.models import (
     ReviewRequest,
     SafeWarning,
     Severity,
-    Violation,
 )
 
 

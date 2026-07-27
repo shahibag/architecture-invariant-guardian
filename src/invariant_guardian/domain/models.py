@@ -25,7 +25,7 @@ class InvariantScope(BaseModel):
     include_paths: list[str] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def _validate_include_paths(self) -> "InvariantScope":
+    def _validate_include_paths(self) -> InvariantScope:
         for p in self.include_paths:
             try:
                 _re.compile(_fnmatch_translate(p))

@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Literal
 
 from openai import APIStatusError, APITimeoutError, AuthenticationError, OpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from invariant_guardian.domain.models import (
     Assessment,
@@ -270,30 +270,28 @@ class OpenAICompatibleJudge:
         messages = self._build_messages(invariants, candidates, diff)
 
         failure: ProviderFailure | None = None
-        last_exception: Exception | None = None
 
-        for attempt in (1, 2):
+        for _attempt in (1, 2):
             try:
-                output, input_tokens, output_tokens = self._call_provider(messages)
-            except AuthenticationError as exc:
+                output, _input_tokens, _output_tokens = self._call_provider(messages)
+            except AuthenticationError:
                 failure = ProviderFailure.AUTHENTICATION_ERROR
-                last_exception = exc
                 break  # never retry auth failures
             except APITimeoutError as exc:
                 failure = classify_failure(None, str(exc))
-                last_exception = exc
                 if failure not in _RETRYABLE_FAILURES:
                     break
                 continue  # retry
             except APIStatusError as exc:
                 failure = classify_failure(str(exc.status_code), str(exc))
-                last_exception = exc
                 if failure not in _RETRYABLE_FAILURES:
                     break
                 continue  # retry
-            except Exception as exc:
+            except ValidationError:
+                failure = ProviderFailure.INVALID_RESPONSE
+                break  # never retry schema failures
+            except Exception as exc:  # noqa: BLE001 — safe catch-all for unexpected errors
                 failure = classify_failure(None, str(exc))
-                last_exception = exc
                 if failure not in _RETRYABLE_FAILURES:
                     break
                 continue  # retry

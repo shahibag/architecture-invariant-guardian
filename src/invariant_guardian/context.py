@@ -6,7 +6,12 @@ import fnmatch as _fnmatch
 import os
 import re
 
-from invariant_guardian.domain.models import ChangedFile, Coverage, CoverageGap, Invariant
+from invariant_guardian.domain.models import (
+    ChangedFile,
+    Coverage,
+    CoverageGap,
+    Invariant,
+)
 
 # ---------------------------------------------------------------------------
 # Fixed context budgets (spec §7)
@@ -33,8 +38,7 @@ def normalize_path(path: str) -> str:
         return ""
     # Strip leading ./ or /
     cleaned = path.lstrip("/")
-    if cleaned.startswith("./"):
-        cleaned = cleaned[2:]
+    cleaned = cleaned.removeprefix("./")
     if not cleaned:
         return ""
     # Resolve .. segments via os.path.normpath, then force POSIX slashes

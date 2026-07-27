@@ -1,3 +1,5 @@
+"""Minimal GitHub REST client — bot-owned comment protection, no PR checkout."""
+
 from __future__ import annotations
 
 import base64
@@ -8,6 +10,41 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from invariant_guardian.rendering.comment import MARKER_PREFIX
+
+BOT_LOGIN = "github-actions[bot]"
+
+
+def is_bot_comment(comment: dict[str, Any], bot_login: str) -> bool:
+    """Return True when *comment* was authored by the bot *and* contains
+    the Guardian marker."""
+    user = comment.get("user", {})
+    if not isinstance(user, dict):
+        return False
+    login = user.get("login", "")
+    if not isinstance(login, str):
+        return False
+    if login.lower() != bot_login.lower():
+        return False
+    body = comment.get("body", "")
+    return isinstance(body, str) and MARKER_PREFIX in body
+
+
+def find_owned_comment(
+    comments: list[dict[str, Any]], bot_login: str
+) -> dict[str, Any] | None:
+    """Return the first bot-owned Guardian comment, or None.
+
+    Contributor-authored comments with copied markers are never returned.
+    """
+    for comment in comments:
+        if isinstance(comment, dict) and is_bot_comment(comment, bot_login):
+            return comment
+    return None
+
+
+def should_skip_update(existing: dict[str, Any], new_body: str) -> bool:
+    """Return True when the comment body is already identical."""
+    return existing.get("body") == new_body
 
 
 class GitHubClient:
@@ -35,27 +72,34 @@ class GitHubClient:
         for entry in listing:
             if entry.get("type") != "file" or not entry.get("name", "").endswith(".md"):
                 continue
-            # entry["url"] already carries the ref from the listing call.
             contents = self._json(entry["url"])
             encoded = contents.get("content", "")
             (destination / entry["name"]).write_bytes(
                 base64.b64decode(encoded.encode("ascii"))
             )
 
-    def publish(self, body: str, fingerprint: str) -> None:
-        comments = self._json(
+    def publish(self, body: str, fingerprint_key: str) -> None:
+        """Create or update the bot-owned Guardian comment.
+
+        - Only patches bot-owned comments (never contributor-authored).
+        - Skips the update when the rendered body is unchanged.
+        """
+        comments_list = self._json(
             f"{self._base}/issues/{self._pull_number}/comments?per_page=100"
         )
-        existing = next(
-            (
-                comment
-                for comment in comments
-                if MARKER_PREFIX in comment.get("body", "")
-            ),
-            None,
-        )
-        if existing and f"{MARKER_PREFIX}{fingerprint} -->" in existing["body"]:
-            return
+        if not isinstance(comments_list, list):
+            comments_list = []
+
+        existing = find_owned_comment(comments_list, BOT_LOGIN)
+
+        if existing:
+            # Never patch a comment we don't own
+            if not is_bot_comment(existing, BOT_LOGIN):
+                # Fall through to create a new comment
+                existing = None
+            elif should_skip_update(existing, body):
+                return  # identical — no-op
+
         if existing:
             self._json(
                 f"{self._base}/issues/comments/{existing['id']}",

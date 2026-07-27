@@ -1,12 +1,21 @@
+"""Safe, human-readable comment rendering for the v0.2 Guardian.
+
+Never renders raw exceptions, provider tokens, or unrelated source.
+"""
+
 from __future__ import annotations
 
 import hashlib
 import json
 
-from invariant_guardian.domain.models import Assessment, AssessmentStatus, Invariant, SafeWarning
+from invariant_guardian.domain.models import (
+    Assessment,
+    AssessmentStatus,
+    Invariant,
+    SafeWarning,
+)
 
-
-MARKER_PREFIX = "<!-- invariant-guardian:"
+MARKER_PREFIX = "<!-- invariant-guardian:v2:"
 
 
 def _warning_text(warning: SafeWarning | str) -> str:
@@ -28,16 +37,50 @@ def fingerprint(assessment: Assessment, head_sha: str) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
 
+def _coverage_summary(coverage) -> str:
+    """Build a one-line summary of evaluated and skipped file counts."""
+    parts = []
+    ev = len(coverage.evaluated_files)
+    sk = len(coverage.skipped_files)
+    parts.append(f"{ev} file(s) evaluated")
+    if sk:
+        parts.append(f"{sk} file(s) skipped")
+    if coverage.context_truncated:
+        parts.append("context was truncated")
+    return "; ".join(parts)
+
+
 def render_comment(assessment: Assessment, invariants: list[Invariant], key: str) -> str:
+    """Render a safe, structured Markdown comment for a Guardian assessment."""
     marker = f"{MARKER_PREFIX}{key} -->"
     title_by_id = {invariant.id: invariant.title for invariant in invariants}
-    lines = [marker, "## Invariant Assessment", ""]
+    lines = [marker, "", "## Invariant Assessment", ""]
+
+    # --- status section ---
     if assessment.status == AssessmentStatus.NO_CONFIRMED_VIOLATIONS:
-        lines.append("No confirmed invariant violations were found in the evaluated changes.")
+        lines.append(
+            "✅ No confirmed invariant violations were found in the evaluated changes."
+        )
+        lines.append(f"Coverage: {_coverage_summary(assessment.coverage)}")
+        lines.append("")
     elif assessment.status == AssessmentStatus.INCOMPLETE:
-        lines.append("⚠️ Assessment incomplete. This is not a clean review.")
+        lines.append("⚠️ **Assessment incomplete.** This is **not** a clean review.")
+        # Show coverage alongside the incomplete status
+        lines.append(f"Coverage: {_coverage_summary(assessment.coverage)}")
+        lines.append("")
+        # Distinguish between no-candidates and provider-failure cases
+        if not assessment.candidates and not assessment.violations and any(
+            "provider" in _warning_text(w).lower()
+            or "unavailable" in _warning_text(w).lower()
+            for w in assessment.warnings
+        ):
+            lines.append(
+                "AI evidence judgment was unavailable. "
+                "A human architect must review these changes."
+            )
     elif assessment.status == AssessmentStatus.CONFIRMED_VIOLATIONS:
         lines.append("Confirmed violations require human review.")
+        lines.append(f"Coverage: {_coverage_summary(assessment.coverage)}")
         lines.append("")
         for violation in assessment.violations:
             lines.extend(
@@ -47,17 +90,15 @@ def render_comment(assessment: Assessment, invariants: list[Invariant], key: str
                     f"- Why it matters: {violation.why_it_matters}",
                     f"- Evidence: {violation.evidence}",
                     f"- Suggested direction: {violation.suggested_direction}",
-                    f"- Confidence: {violation.confidence}",
                     "",
                 ]
             )
     else:
-        lines.extend(
-            [
-                "⚠️ Candidate findings require evidence judgment before they become violations.",
-                "",
-            ]
+        # CANDIDATES_REQUIRE_JUDGMENT — legacy path
+        lines.append(
+            "⚠️ Candidate findings require evidence judgment before they become violations."
         )
+        lines.append("")
         for candidate in assessment.candidates:
             lines.extend(
                 [
@@ -65,16 +106,24 @@ def render_comment(assessment: Assessment, invariants: list[Invariant], key: str
                     f"- Location: {candidate.file}:{candidate.start_line}",
                     f"- Signal: {candidate.pattern}",
                     f"- Evidence: {candidate.evidence}",
-                    f"- Confidence: {candidate.confidence}",
                     "",
                 ]
             )
+
+    # --- warnings / notes ---
     if assessment.warnings:
-        lines.extend(["### Notes", *[f"- {_warning_text(warning)}" for warning in assessment.warnings]])
+        lines.append("### Notes")
+        for warning in assessment.warnings:
+            lines.append(f"- {_warning_text(warning)}")
+        lines.append("")
+
+    # --- advisory footer ---
     lines.extend(
         [
-            "",
-            "_Invariant Guardian assesses repository-owned architecture rules; human review remains the decision point._",
+            (
+                "_Invariant Guardian assesses repository-owned architecture rules; "
+                "human review remains the decision point._"
+            ),
         ]
     )
     return "\n".join(lines)

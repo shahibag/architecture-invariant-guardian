@@ -1,3 +1,5 @@
+"""GitHub Action runner — event translation, judgement, publication, outputs."""
+
 from __future__ import annotations
 
 import json
@@ -11,6 +13,27 @@ from invariant_guardian.application import assess_diff
 from invariant_guardian.domain.models import Assessment, AssessmentStatus, SafeWarning
 from invariant_guardian.invariants import load_invariants
 from invariant_guardian.rendering.comment import fingerprint, render_comment
+
+
+def _write_action_outputs(assessment: Assessment) -> None:
+    """Write the v0.2 Action outputs to GITHUB_OUTPUT (spec §10)."""
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if not output_path:
+        return  # not running inside an Action — graceful no-op
+
+    confirmed_count = len(assessment.violations)
+    candidate_count = len(assessment.candidates)
+    coverage_complete = (
+        "false"
+        if (assessment.coverage.skipped_files or assessment.coverage.context_truncated)
+        else "true"
+    )
+
+    with open(output_path, "a", encoding="utf-8") as f:
+        f.write(f"assessment-status={assessment.status.value}\n")
+        f.write(f"confirmed-count={confirmed_count}\n")
+        f.write(f"candidate-count={candidate_count}\n")
+        f.write(f"coverage-complete={coverage_complete}\n")
 
 
 def run() -> int:
@@ -42,34 +65,26 @@ def run() -> int:
         )
         api_key = os.environ.get("INPUT_LLM-API-KEY") or os.environ.get("LLM_API_KEY")
         if assessment.candidates and api_key:
-            try:
-                assessment = OpenAICompatibleJudge(
-                    api_key=api_key,
-                    model=(
-                        os.environ.get("INPUT_MODEL")
-                        or os.environ.get("LLM_MODEL")
-                        or "deepseek-v4-flash"
-                    ),
-                    base_url=(
-                        os.environ.get("INPUT_LLM-BASE-URL")
-                        or os.environ.get("LLM_BASE_URL")
-                        or "https://api.deepseek.com"
-                    ),
-                ).confirm(invariants, assessment.candidates, diff)
-            except Exception as exc:
-                assessment = Assessment(
-                    status=AssessmentStatus.INCOMPLETE,
-                    warnings=[
-                        *assessment.warnings,
-                        SafeWarning(
-                            category="provider_failure",
-                            message=f"AI evidence judgment failed: {exc}",
-                        ),
-                    ],
-                )
+            judge = OpenAICompatibleJudge(
+                api_key=api_key,
+                model=(
+                    os.environ.get("INPUT_MODEL")
+                    or os.environ.get("LLM_MODEL")
+                    or "deepseek-v4-flash"
+                ),
+                base_url=(
+                    os.environ.get("INPUT_LLM-BASE-URL")
+                    or os.environ.get("LLM_BASE_URL")
+                    or "https://api.deepseek.com"
+                ),
+            )
+            assessment = judge.confirm(invariants, assessment.candidates, diff)
+            # The judge now returns INCOMPLETE on failure with safe warnings
+            # instead of raising, so the raw-exception catch is no longer needed.
         elif assessment.candidates:
             assessment = Assessment(
                 status=AssessmentStatus.INCOMPLETE,
+                coverage=assessment.coverage,
                 warnings=[
                     *assessment.warnings,
                     SafeWarning(
@@ -78,7 +93,9 @@ def run() -> int:
                     ),
                 ],
             )
+
         key = fingerprint(assessment, pull_request["head"]["sha"])
         client.publish(render_comment(assessment, invariants, key), key)
+        _write_action_outputs(assessment)
         print(json.dumps(assessment.model_dump(mode="json")))
     return 0

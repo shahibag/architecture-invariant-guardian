@@ -14,7 +14,6 @@ from invariant_guardian.context import (
 from invariant_guardian.domain.models import (
     ChangedFile,
     Coverage,
-    CoverageGap,
     Invariant,
     InvariantScope,
     Severity,
@@ -125,14 +124,14 @@ class TestContextBudgets:
 class TestBuildCoverage:
     @staticmethod
     def _java(path: str, **kw) -> ChangedFile:
-        defaults = dict(
-            path=path,
-            status="modified",
-            patch="@@ -1 +1 @@\n-old\n+new",
-            patch_complete=True,
-        )
-        defaults.update(kw)
-        return ChangedFile(**defaults)
+        kwargs = {
+            "path": path,
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-old\n+new",
+            "patch_complete": True,
+        }
+        kwargs.update(kw)
+        return ChangedFile(**kwargs)
 
     def test_all_in_scope_files_evaluated(self) -> None:
         inv = Invariant(

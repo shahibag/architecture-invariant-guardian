@@ -2,7 +2,6 @@ from pathlib import Path
 
 from invariant_guardian.invariants import load_invariants
 
-
 FIXTURES = Path(__file__).parent / "fixtures"
 
 

@@ -8,8 +8,6 @@ from invariant_guardian.domain.models import (
     AssessmentStatus,
     ChangedFile,
     Coverage,
-    CoverageGap,
-    Invariant,
     ReviewRequest,
     SafeWarning,
 )
@@ -168,7 +166,6 @@ def _diff_to_changed_files(diff: str) -> list[ChangedFile]:
     This is a bridge for the legacy ``assess_diff`` entry-point; the real
     GitHub adapter uses the files endpoint directly.
     """
-    import re
 
     files: dict[str, list[str]] = {}
     current_path: str | None = None

@@ -8,14 +8,11 @@ from invariant_guardian.domain.models import (
     AssessmentStatus,
     ChangedFile,
     Coverage,
-    CoverageGap,
     Invariant,
     InvariantScope,
     ReviewRequest,
-    SafeWarning,
     Severity,
 )
-
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

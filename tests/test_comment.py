@@ -3,12 +3,18 @@ from invariant_guardian.domain.models import (
     AssessmentStatus,
     CandidateFinding,
     Coverage,
+    CoverageGap,
     Invariant,
     InvariantScope,
+    SafeWarning,
     Severity,
+    Violation,
 )
-from invariant_guardian.rendering.comment import fingerprint, render_comment
-
+from invariant_guardian.rendering.comment import (
+    MARKER_PREFIX,
+    fingerprint,
+    render_comment,
+)
 
 INVARIANT = Invariant(
     id="no-domain-leak",
@@ -22,33 +28,125 @@ INVARIANT = Invariant(
 )
 
 
-def test_rendered_comment_has_stable_marker_and_candidate_evidence() -> None:
-    assessment = Assessment(
-        status=AssessmentStatus.CANDIDATES_REQUIRE_JUDGMENT,
-        coverage=Coverage(evaluated_files=["src/OrderController.java"]),
-        candidates=[
-            CandidateFinding(
-                invariant_id="no-domain-leak",
-                file="src/OrderController.java",
-                start_line=9,
-                end_line=9,
-                pattern="public boundary",
-                evidence="public OrderEntity get()",
-                confidence="medium",
-            )
-        ],
-    )
+# ---------------------------------------------------------------------------
+# v2 marker
+# ---------------------------------------------------------------------------
+class TestV2Marker:
+    def test_marker_prefix_is_v2(self) -> None:
+        assert MARKER_PREFIX.startswith("<!-- invariant-guardian:v2:")
 
-    key = fingerprint(assessment, "abc123")
-    comment = render_comment(assessment, [INVARIANT], key)
-
-    assert f"<!-- invariant-guardian:{key} -->" in comment
-    assert "src/OrderController.java:9" in comment
-    assert "Candidate findings require evidence judgment" in comment
+    def test_rendered_comment_has_v2_marker(self) -> None:
+        assessment = Assessment(
+            status=AssessmentStatus.NO_CONFIRMED_VIOLATIONS,
+            coverage=Coverage(),
+        )
+        key = fingerprint(assessment, "abc123")
+        comment = render_comment(assessment, [INVARIANT], key)
+        assert f"<!-- invariant-guardian:v2:{key} -->" in comment
+        # Old v1 marker must not appear
+        assert "<!-- invariant-guardian:" not in comment.replace(
+            "<!-- invariant-guardian:v2:", ""
+        )
 
 
+# ---------------------------------------------------------------------------
+# Coverage rendering
+# ---------------------------------------------------------------------------
+class TestCoverageRendering:
+    def test_incomplete_shows_coverage_counts(self) -> None:
+        assessment = Assessment(
+            status=AssessmentStatus.INCOMPLETE,
+            coverage=Coverage(
+                evaluated_files=["src/Foo.java"],
+                skipped_files=[
+                    CoverageGap(file="src/Bar.java", reason="excluded by scope"),
+                ],
+            ),
+        )
+        key = fingerprint(assessment, "abc123")
+        comment = render_comment(assessment, [INVARIANT], key)
+
+        assert "1 evaluated" in comment.lower() or "1 file(s) evaluated" in comment.lower()
+        assert "1 skipped" in comment.lower() or "1 file(s) skipped" in comment.lower()
+
+    def test_incomplete_with_provider_failure_warning(self) -> None:
+        assessment = Assessment(
+            status=AssessmentStatus.INCOMPLETE,
+            coverage=Coverage(context_truncated=True),
+            warnings=[
+                SafeWarning(
+                    category="provider_failure",
+                    message="AI judgment was unavailable (provider_unavailable).",
+                ),
+            ],
+        )
+        key = fingerprint(assessment, "abc123")
+        comment = render_comment(assessment, [INVARIANT], key)
+
+        assert "provider_unavailable" in comment.lower()
+        # Never render raw exception text
+        assert "traceback" not in comment.lower()
+
+    def test_clean_shows_evaluated_count(self) -> None:
+        assessment = Assessment(
+            status=AssessmentStatus.NO_CONFIRMED_VIOLATIONS,
+            coverage=Coverage(evaluated_files=["src/Foo.java", "src/Bar.java"]),
+        )
+        key = fingerprint(assessment, "abc123")
+        comment = render_comment(assessment, [INVARIANT], key)
+        assert "2 evaluated" in comment.lower() or "2 file(s) evaluated" in comment.lower()
+
+    def test_confirmed_violations_with_candidates(self) -> None:
+        assessment = Assessment(
+            status=AssessmentStatus.CONFIRMED_VIOLATIONS,
+            coverage=Coverage(evaluated_files=["src/Bad.java"]),
+            candidates=[
+                CandidateFinding(
+                    invariant_id="no-domain-leak",
+                    file="src/Bad.java",
+                    start_line=10,
+                    end_line=10,
+                    pattern="public boundary",
+                    evidence="public OrderEntity get()",
+                    confidence="medium",
+                ),
+            ],
+            violations=[
+                Violation(
+                    invariant_id="no-domain-leak",
+                    file="src/Bad.java",
+                    start_line=10,
+                    end_line=10,
+                    pattern="public boundary",
+                    evidence="public OrderEntity get()",
+                    confidence="medium",
+                    why_it_matters="Entity leaks.",
+                    suggested_direction="Use DTO.",
+                ),
+            ],
+        )
+        key = fingerprint(assessment, "abc123")
+        comment = render_comment(assessment, [INVARIANT], key)
+        assert "confirmed" in comment.lower()
+        assert "src/Bad.java" in comment
+        assert "1 evaluated" in comment.lower() or "1 file(s) evaluated" in comment.lower()
+
+    def test_no_confirmed_has_advisory(self) -> None:
+        assessment = Assessment(
+            status=AssessmentStatus.NO_CONFIRMED_VIOLATIONS,
+            coverage=Coverage(),
+        )
+        key = fingerprint(assessment, "abc123")
+        comment = render_comment(assessment, [INVARIANT], key)
+        assert "human review" in comment.lower()
+
+
+# ---------------------------------------------------------------------------
+# Fingerprint — unchanged
+# ---------------------------------------------------------------------------
 def test_fingerprint_changes_when_assessment_changes() -> None:
-    clean = Assessment(status=AssessmentStatus.NO_CONFIRMED_VIOLATIONS, coverage=Coverage())
+    clean = Assessment(
+        status=AssessmentStatus.NO_CONFIRMED_VIOLATIONS, coverage=Coverage()
+    )
     incomplete = Assessment(status=AssessmentStatus.INCOMPLETE, coverage=Coverage())
-
     assert fingerprint(clean, "sha") != fingerprint(incomplete, "sha")
