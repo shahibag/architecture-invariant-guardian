@@ -1,11 +1,17 @@
+"""Contract tests for the OpenAI-compatible judge — valid, invalid, and
+malformed responses."""
+
 import json
 from types import SimpleNamespace
 
-import pytest
-
 from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
-from invariant_guardian.domain.models import CandidateFinding, Invariant, InvariantScope, Severity
-
+from invariant_guardian.domain.models import (
+    AssessmentStatus,
+    CandidateFinding,
+    Invariant,
+    InvariantScope,
+    Severity,
+)
 
 INVARIANT = Invariant(
     id="no-domain-leak",
@@ -40,7 +46,8 @@ class FakeResponses:
                 SimpleNamespace(
                     message=SimpleNamespace(content=json.dumps(self._output))
                 )
-            ]
+            ],
+            usage=None,  # v0.2 — response.usage must exist
         )
 
 
@@ -66,20 +73,26 @@ def test_judge_confirms_only_an_existing_candidate() -> None:
         [INVARIANT], [CANDIDATE], "diff"
     )
 
+    assert assessment.status == AssessmentStatus.CONFIRMED_VIOLATIONS
     assert assessment.violations[0].file == CANDIDATE.file
     assert assessment.violations[0].suggested_direction == "Return a DTO instead."
     assert client.chat.completions.request["response_format"]["type"] == "json_object"
 
 
-def test_judge_raises_on_malformed_response() -> None:
+def test_malformed_response_returns_incomplete() -> None:
+    """A response that doesn't match the expected schema returns INCOMPLETE,
+    never raises."""
     client = FakeClient({"unexpected": True})
-    with pytest.raises(Exception):
-        OpenAICompatibleJudge("unused", client=client).confirm(
-            [INVARIANT], [CANDIDATE], "diff"
-        )
+    assessment = OpenAICompatibleJudge("unused", client=client).confirm(
+        [INVARIANT], [CANDIDATE], "diff"
+    )
+    assert assessment.status == AssessmentStatus.INCOMPLETE
+    assert assessment.violations == []
+    assert any("invalid" in w.message.lower() for w in assessment.warnings)
 
 
-def test_judge_rejects_unknown_candidate_index() -> None:
+def test_unknown_candidate_index_returns_incomplete() -> None:
+    """An unknown candidate index in the provider output returns INCOMPLETE."""
     client = FakeClient(
         {
             "decisions": [
@@ -92,8 +105,29 @@ def test_judge_rejects_unknown_candidate_index() -> None:
             ]
         }
     )
+    assessment = OpenAICompatibleJudge("unused", client=client).confirm(
+        [INVARIANT], [CANDIDATE], "diff"
+    )
+    assert assessment.status == AssessmentStatus.INCOMPLETE
+    assert assessment.violations == []
 
-    with pytest.raises(ValueError, match="unknown candidate"):
-        OpenAICompatibleJudge("unused", client=client).confirm(
-            [INVARIANT], [CANDIDATE], "diff"
-        )
+
+def test_duplicate_decision_index_returns_incomplete() -> None:
+    client = FakeClient(
+        {
+            "decisions": [
+                {"candidate_index": 0, "decision": "confirm", "why_it_matters": "A", "suggested_direction": ""},
+                {"candidate_index": 0, "decision": "reject", "why_it_matters": "B", "suggested_direction": ""},
+            ]
+        }
+    )
+    assessment = OpenAICompatibleJudge("unused", client=client).confirm(
+        [INVARIANT], [CANDIDATE], "diff"
+    )
+    assert assessment.status == AssessmentStatus.INCOMPLETE
+
+
+def test_empty_candidates_returns_clean() -> None:
+    assessment = OpenAICompatibleJudge("unused").confirm([INVARIANT], [], "diff")
+    assert assessment.status == AssessmentStatus.NO_CONFIRMED_VIOLATIONS
+    assert assessment.violations == []
