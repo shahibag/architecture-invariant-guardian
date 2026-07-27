@@ -56,7 +56,7 @@ def run() -> int:
     if pull_request["head"]["repo"].get("fork"):
         assessment = Assessment(
             status=AssessmentStatus.INCOMPLETE,
-            coverage=Coverage(),
+            coverage=Coverage(context_truncated=True),
             warnings=[
                 SafeWarning(
                     category="fork",
@@ -115,6 +115,11 @@ def run() -> int:
         assessment.warnings.extend(
             SafeWarning(category="load", message=w) for w in warnings
         )
+        if warnings:
+            # A malformed repository-owned invariant means the requested
+            # policy set was not fully evaluated.
+            assessment.status = AssessmentStatus.INCOMPLETE
+            assessment.coverage.context_truncated = True
 
         # --- publish ---------------------------------------------------------
         key = fingerprint(assessment, pull_request["head"]["sha"])

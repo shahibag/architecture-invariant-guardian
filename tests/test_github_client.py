@@ -140,3 +140,38 @@ class TestGitHubClientConstruction:
         assert client._token == "token"
         assert client._repository == "owner/repo"
         assert client._pull_number == 42
+
+
+class TestChangedFilesPagination:
+    def test_fetches_one_extra_record_to_signal_file_ceiling(self) -> None:
+        client = GitHubClient("token", "owner/repo", 42)
+        calls = 0
+
+        def fake_page(url: str):
+            nonlocal calls
+            calls += 1
+            start = (calls - 1) * 100
+            entries = [
+                {
+                    "filename": f"src/File{i}.java",
+                    "status": "modified",
+                    "patch": "@@ -1 +1 @@\n+class File {}",
+                }
+                for i in range(start, start + 100)
+            ]
+            return entries, (f"page-{calls + 1}" if calls < 3 else "")
+
+        client._json_with_link = fake_page  # type: ignore[method-assign]
+        files = client.changed_files()
+        assert calls == 3
+        assert len(files) == 201
+
+    def test_missing_non_removed_patch_is_incomplete(self) -> None:
+        client = GitHubClient("token", "owner/repo", 42)
+        client._json_with_link = lambda url: (  # type: ignore[method-assign]
+            [{"filename": "src/Foo.java", "status": "modified"}],
+            "",
+        )
+        [changed] = client.changed_files()
+        assert changed.patch is None
+        assert changed.patch_complete is False

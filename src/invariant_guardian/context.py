@@ -151,6 +151,7 @@ def build_coverage(
     evaluated: list[str] = []
     skipped: list[CoverageGap] = []
     truncated = False
+    aggregate_bytes = 0
 
     # Truncate total file count
     if len(changed_files) > MAX_CHANGED_FILES:
@@ -171,7 +172,22 @@ def build_coverage(
             truncated = True
             continue
 
+        # Missing patch on a non-removed in-scope file is a coverage gap.
+        # GitHub may omit the patch for large or binary files even when the
+        # file is in scope.
+        if cf.patch is None and cf.status != "removed":
+            skipped.append(
+                CoverageGap(
+                    file=norm,
+                    reason="patch unavailable (file may be too large or binary)",
+                )
+            )
+            truncated = True
+            continue
+
         patch_bytes = len(cf.patch.encode("utf-8")) if cf.patch else 0
+
+        # Per-file check — individual patch must not exceed the ceiling
         if patch_bytes > MAX_PATCH_BYTES:
             skipped.append(
                 CoverageGap(
@@ -181,6 +197,19 @@ def build_coverage(
             )
             truncated = True
             continue
+
+        # Aggregate check — total in-scope bytes must not exceed the ceiling
+        if aggregate_bytes + patch_bytes > MAX_PATCH_BYTES:
+            skipped.append(
+                CoverageGap(
+                    file=norm,
+                    reason=f"aggregate patch limit ({MAX_PATCH_BYTES} bytes) would be exceeded",
+                )
+            )
+            truncated = True
+            continue
+
+        aggregate_bytes += patch_bytes
 
         # Removed files are tracked but not evaluated for new violations
         if cf.status == "removed":

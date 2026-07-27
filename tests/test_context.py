@@ -314,3 +314,69 @@ class TestBuildCoverage:
         cov = build_coverage([inv], files)
         # removed files should be in evaluated or skipped but not cause errors
         assert isinstance(cov, Coverage)
+
+    def test_missing_patch_on_non_removed_file_is_coverage_gap(self) -> None:
+        """When patch is None on a modified/added in-scope file, it must be
+        recorded as a coverage gap, not silently evaluated."""
+        inv = Invariant(
+            id="test",
+            title="Test",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="R",
+            rationale="R",
+            violating_examples="VE",
+            acceptable_examples="AE",
+        )
+        files = [
+            ChangedFile(
+                path="src/Foo.java",
+                status="modified",
+                patch=None,
+                patch_complete=True,
+            ),
+        ]
+        cov = build_coverage([inv], files)
+        assert cov.evaluated_files == []
+        assert len(cov.skipped_files) == 1
+        assert "unavailable" in cov.skipped_files[0].reason.lower()
+        assert cov.context_truncated is True
+
+    def test_aggregate_patch_bytes_enforced(self) -> None:
+        """MAX_PATCH_BYTES is an aggregate ceiling across all in-scope
+        patches, not a per-file allowance.  Two 120 KB files exceed the
+        200 KB aggregate ceiling and the second must be recorded as skipped."""
+        inv = Invariant(
+            id="test",
+            title="Test",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="R",
+            rationale="R",
+            violating_examples="VE",
+            acceptable_examples="AE",
+        )
+        filler_a = "// a\n" + "x" * (MAX_PATCH_BYTES // 2)
+        filler_b = "// b\n" + "x" * (MAX_PATCH_BYTES // 2)
+        files = [
+            ChangedFile(
+                path="src/A.java",
+                status="modified",
+                patch=f"@@ -1 +1 @@\n-old\n+new\n{filler_a}",
+                patch_complete=True,
+            ),
+            ChangedFile(
+                path="src/B.java",
+                status="modified",
+                patch=f"@@ -1 +1 @@\n-old\n+new\n{filler_b}",
+                patch_complete=True,
+            ),
+        ]
+        cov = build_coverage([inv], files)
+        # At least one file should be skipped because aggregate ceiling
+        # is exceeded
+        assert len(cov.skipped_files) >= 1 or cov.context_truncated, (
+            f"Expected truncation when aggregate bytes exceed "
+            f"{MAX_PATCH_BYTES}, but got {len(cov.skipped_files)} skipped "
+            f"and context_truncated={cov.context_truncated}"
+        )

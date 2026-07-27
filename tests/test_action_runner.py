@@ -35,3 +35,11 @@ def test_action_runner_skips_forked_pull_requests(
     assert len(output["warnings"]) >= 1
     assert any("fork" in w["category"].lower() or "fork" in w["message"].lower()
                for w in output["warnings"])
+
+    # P2.3: Fork assessments must report coverage-complete=false.
+    # No changed files were fetched or evaluated.
+    assert output["coverage"] == {
+        "evaluated_files": [],
+        "skipped_files": [],
+        "context_truncated": True,
+    }, f"Fork coverage must have context_truncated=True, got {output['coverage']}"

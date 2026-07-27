@@ -27,10 +27,31 @@ class InvariantScope(BaseModel):
     @model_validator(mode="after")
     def _validate_include_paths(self) -> InvariantScope:
         for p in self.include_paths:
+            # --- structural checks before fnmatch.translate masks issues ---
+            if not p:
+                raise ValueError(f"invalid scope include_path {p!r}: empty pattern")
+            if "\x00" in p:
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: null byte"
+                )
+            if _re.match(r"^(/[^/]+|[A-Za-z]:[/\\])", p):
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: absolute path"
+                )
+            if _re.search(r"(?:^|[/\\])\.\.[/\\]", p):
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: path traversal"
+                )
+            if _re.search(r"\[[^]]*$", p):
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: unbalanced bracket"
+                )
             try:
                 _re.compile(_fnmatch_translate(p))
             except _re.error as exc:
-                raise ValueError(f"invalid scope include_path {p!r}: {exc}") from exc
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: {exc}"
+                ) from exc
         return self
 
 

@@ -95,6 +95,33 @@ class TestProviderUsage:
 
 
 # ---------------------------------------------------------------------------
+# InvariantScope — rejects malformed globs at model level
+# ---------------------------------------------------------------------------
+class TestInvariantScopeValidation:
+    """P2.1: InvariantScope must reject unsafe/malformed glob patterns."""
+
+    def test_unbalanced_bracket_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="scope|bracket|invalid"):
+            InvariantScope(languages=["java"], include_paths=["src/[bad"])
+
+    def test_empty_string_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="scope|empty|invalid"):
+            InvariantScope(languages=["java"], include_paths=[""])
+
+    def test_absolute_path_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="scope|absolute|invalid"):
+            InvariantScope(languages=["java"], include_paths=["/etc/passwd"])
+
+    def test_null_byte_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="scope|null|invalid"):
+            InvariantScope(languages=["java"], include_paths=["src/\x00evil"])
+
+    def test_traversal_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="scope|traversal|invalid"):
+            InvariantScope(languages=["java"], include_paths=["../../etc/passwd"])
+
+
+# ---------------------------------------------------------------------------
 # SafeWarning
 # ---------------------------------------------------------------------------
 class TestSafeWarning:
