@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from invariant_guardian.adapters.github.client import GitHubClient
 from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
 from invariant_guardian.application import assess_diff
-from invariant_guardian.domain.models import Assessment, AssessmentStatus
+from invariant_guardian.domain.models import Assessment, AssessmentStatus, SafeWarning
 from invariant_guardian.invariants import load_invariants
 from invariant_guardian.rendering.comment import fingerprint, render_comment
 
@@ -37,7 +37,9 @@ def run() -> int:
         invariants, warnings = load_invariants(invariant_dir)
         diff = client.pull_diff()
         assessment = assess_diff(invariant_dir, diff)
-        assessment.warnings.extend(warnings)
+        assessment.warnings.extend(
+            SafeWarning(category="load", message=w) for w in warnings
+        )
         api_key = os.environ.get("INPUT_LLM-API-KEY") or os.environ.get("LLM_API_KEY")
         if assessment.candidates and api_key:
             try:
@@ -59,7 +61,10 @@ def run() -> int:
                     status=AssessmentStatus.INCOMPLETE,
                     warnings=[
                         *assessment.warnings,
-                        f"AI evidence judgment failed: {exc}",
+                        SafeWarning(
+                            category="provider_failure",
+                            message=f"AI evidence judgment failed: {exc}",
+                        ),
                     ],
                 )
         elif assessment.candidates:
@@ -67,7 +72,10 @@ def run() -> int:
                 status=AssessmentStatus.INCOMPLETE,
                 warnings=[
                     *assessment.warnings,
-                    "AI evidence judgment skipped because no compatible-provider API key was available.",
+                    SafeWarning(
+                        category="provider_unavailable",
+                        message="AI evidence judgment skipped because no compatible-provider API key was available.",
+                    ),
                 ],
             )
         key = fingerprint(assessment, pull_request["head"]["sha"])

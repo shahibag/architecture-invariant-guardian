@@ -10,6 +10,7 @@ from invariant_guardian.domain.models import (
     Assessment,
     AssessmentStatus,
     CandidateFinding,
+    Coverage,
     Invariant,
     Violation,
 )
@@ -46,7 +47,10 @@ class OpenAICompatibleJudge:
         diff: str,
     ) -> Assessment:
         if not candidates:
-            return Assessment(status=AssessmentStatus.NO_CONFIRMED_VIOLATIONS)
+            return Assessment(
+                status=AssessmentStatus.NO_CONFIRMED_VIOLATIONS,
+                coverage=Coverage(),
+            )
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[
@@ -105,6 +109,7 @@ class OpenAICompatibleJudge:
                 else AssessmentStatus.NO_CONFIRMED_VIOLATIONS
             ),
             violations=violations,
+            coverage=Coverage(),
         )
 
     @staticmethod

@@ -3,10 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 
-from invariant_guardian.domain.models import Assessment, AssessmentStatus, Invariant
+from invariant_guardian.domain.models import Assessment, AssessmentStatus, Invariant, SafeWarning
 
 
 MARKER_PREFIX = "<!-- invariant-guardian:"
+
+
+def _warning_text(warning: SafeWarning | str) -> str:
+    """Return the display text for a warning, handling both legacy str
+    and SafeWarning objects."""
+    if isinstance(warning, SafeWarning):
+        return warning.message
+    return str(warning)
 
 
 def fingerprint(assessment: Assessment, head_sha: str) -> str:
@@ -62,7 +70,7 @@ def render_comment(assessment: Assessment, invariants: list[Invariant], key: str
                 ]
             )
     if assessment.warnings:
-        lines.extend(["### Notes", *[f"- {warning}" for warning in assessment.warnings]])
+        lines.extend(["### Notes", *[f"- {_warning_text(warning)}" for warning in assessment.warnings]])
     lines.extend(
         [
             "",
