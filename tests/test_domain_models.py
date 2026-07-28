@@ -51,6 +51,60 @@ class TestChangedFile:
                 patch_complete=True,
             )
 
+    # Phase 3 fail-closed: path safety validation at model level
+    def test_path_with_null_byte_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ChangedFile(
+                path="src/A\x00.java",
+                status="modified",
+                patch="@@ -1 +1 @@",
+            )
+
+    def test_path_with_leading_slash_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ChangedFile(
+                path="/etc/passwd",
+                status="modified",
+                patch="@@ -1 +1 @@",
+            )
+
+    def test_path_with_dot_dot_component_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ChangedFile(
+                path="src/../secret.txt",
+                status="modified",
+                patch="@@ -1 +1 @@",
+            )
+
+    def test_path_with_dot_component_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ChangedFile(
+                path=".",
+                status="modified",
+                patch="@@ -1 +1 @@",
+            )
+
+    def test_renamed_without_previous_filename_accepted_at_model_level(self) -> None:
+        """The model allows previous_filename=None for renamed files —
+        the client enforces the requirement at the API boundary."""
+        cf = ChangedFile(
+            path="src/New.java",
+            status="renamed",
+            patch="@@ -1 +1 @@",
+            previous_filename=None,
+        )
+        assert cf.status == "renamed"
+        assert cf.previous_filename is None
+
+    def test_renamed_previous_filename_must_be_safe(self) -> None:
+        with pytest.raises(ValidationError):
+            ChangedFile(
+                path="src/New.java",
+                status="renamed",
+                patch="@@ -1 +1 @@",
+                previous_filename="../Old.java",
+            )
+
 
 # ---------------------------------------------------------------------------
 # CoverageGap

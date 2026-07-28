@@ -93,6 +93,78 @@ class ChangedFile(BaseModel):
     status: Literal["added", "modified", "removed", "renamed"]
     patch: str | None = None
     patch_complete: bool = True
+    previous_filename: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_safe_paths(self) -> ChangedFile:
+        """Phase 3 fail-closed: enforce safe repository-relative paths.
+
+        - *path* must be nonempty, no NUL, no leading ``/``, no ``.`` or
+          ``..`` components, no backslash separators.
+        - *previous_filename*, when supplied, must satisfy the same
+          constraints (client-level enforcement ensures it is required
+          for renamed files).
+        """
+        # --- path safety -------------------------------------------------------
+        if not self.path:
+            raise ValueError(
+                f"ChangedFile path {self.path!r}: must be nonempty"
+            )
+        if "\x00" in self.path:
+            raise ValueError(
+                f"ChangedFile path {self.path!r}: contains null byte"
+            )
+        if self.path.startswith("/"):
+            raise ValueError(
+                f"ChangedFile path {self.path!r}: must not be absolute"
+            )
+        if "\\" in self.path:
+            raise ValueError(
+                f"ChangedFile path {self.path!r}: must use POSIX separators"
+            )
+        parts = self.path.split("/")
+        for part in parts:
+            if part in (".", ".."):
+                raise ValueError(
+                    f"ChangedFile path {self.path!r}: must not contain "
+                    f"dot or dot-dot components"
+                )
+            if not part:
+                raise ValueError(
+                    f"ChangedFile path {self.path!r}: must not contain "
+                    f"empty path components"
+                )
+
+        # --- previous_filename safety (when supplied) -------------------------
+        if self.previous_filename is not None:
+            prev = self.previous_filename
+            if not prev:
+                raise ValueError("previous_filename must be nonempty")
+            if "\x00" in prev:
+                raise ValueError(
+                    f"previous_filename {prev!r}: contains null byte"
+                )
+            if prev.startswith("/"):
+                raise ValueError(
+                    f"previous_filename {prev!r}: must not be absolute"
+                )
+            if "\\" in prev:
+                raise ValueError(
+                    f"previous_filename {prev!r}: must use POSIX separators"
+                )
+            for part in prev.split("/"):
+                if part in (".", ".."):
+                    raise ValueError(
+                        f"previous_filename {prev!r}: must not contain "
+                        f"dot or dot-dot components"
+                    )
+                if not part:
+                    raise ValueError(
+                        f"previous_filename {prev!r}: must not contain "
+                        f"empty path components"
+                    )
+
+        return self
 
 
 class CoverageGap(BaseModel):

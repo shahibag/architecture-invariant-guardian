@@ -18,6 +18,12 @@ from invariant_guardian.domain.models import (
 
 MARKER_PREFIX = "<!-- invariant-guardian:v2:"
 
+# Strict marker regex — exact first-line anchored v2 syntax with
+# exactly 16 lowercase hex characters.
+# Matches: <!-- invariant-guardian:v2:abcdef0123456789 -->
+# Rejects: v1/v3, wrong length, uppercase hex, substring, later-line
+MARKER_RE = re.compile(r"^<!-- invariant-guardian:v2:[0-9a-f]{16} -->$")
+
 # Characters that can introduce active or misleading Markdown when supplied by
 # untrusted input (source code, provider output, warnings). Backslash-escape
 # formatting punctuation and separately neutralize mentions and bare URLs.
