@@ -36,50 +36,16 @@ jobs:
           docker run --rm --entrypoint python invariant-guardian:ci-test
           -c "from invariant_guardian.rules.java_ast import parse_java_source; print('parser OK')"
       - name: Docker assess with fixture invariants
-        run: >-
-          docker run --rm
-          -v ${{ github.workspace }}/tests/fixtures:/fixtures:ro
-          invariant-guardian:ci-test
-          assess --invariants /fixtures/invariants --diff /fixtures/clean.diff
-          | python -c "
-          import json, sys
-          d = json.load(sys.stdin)
-          assert d['status'] == 'no_confirmed_violations', f'Expected no_confirmed_violations, got {d[\"status\"]}'
-          assert len(d['candidates']) == 0, f'Expected 0 candidates, got {len(d[\"candidates\"])}'
-          assert len(d['violations']) == 0, f'Expected 0 violations, got {len(d[\"violations\"])}'
-          assert d['coverage']['context_truncated'] == False
-          assert len(d['coverage']['evaluated_files']) >= 1
-          print('PASS: clean.diff → no_confirmed_violations')
-          "
+        run: |
+          docker run --rm -v ${{ github.workspace }}/tests/fixtures:/fixtures:ro invariant-guardian:ci-test assess --invariants /fixtures/invariants --diff /fixtures/clean.diff > /tmp/guardian-clean.json
+          python -c "import json; d=json.load(open('/tmp/guardian-clean.json')); assert d['status'] == 'no_confirmed_violations'; assert not d['candidates']; assert not d['violations']; assert not d['coverage']['context_truncated']; assert d['coverage']['evaluated_files']; print('PASS: clean fixture')"
       - name: Docker assess domain-leak violation
-        run: >-
-          docker run --rm
-          -v ${{ github.workspace }}/tests/fixtures:/fixtures:ro
-          invariant-guardian:ci-test
-          assess --invariants /fixtures/invariants --diff /fixtures/domain_leak.diff
-          | python -c "
-          import json, sys
-          d = json.load(sys.stdin)
-          assert d['status'] == 'candidates_require_judgment', f'Expected candidates_require_judgment, got {d[\"status\"]}'
-          assert len(d['candidates']) >= 1, f'Expected >=1 candidate, got {len(d[\"candidates\"])}'
-          assert any(c['invariant_id'] == 'no-domain-leak' for c in d['candidates'])
-          assert d['coverage']['context_truncated'] == False
-          print('PASS: domain_leak.diff → candidates_require_judgment')
-          "
+        run: |
+          docker run --rm -v ${{ github.workspace }}/tests/fixtures:/fixtures:ro invariant-guardian:ci-test assess --invariants /fixtures/invariants --diff /fixtures/domain_leak.diff > /tmp/guardian-domain.json
+          python -c "import json; d=json.load(open('/tmp/guardian-domain.json')); assert d['status'] == 'candidates_require_judgment'; assert any(c['invariant_id'] == 'no-domain-leak' for c in d['candidates']); assert not d['coverage']['context_truncated']; print('PASS: domain-leak fixture')"
       - name: Docker assess temporary-monitoring violation
-        run: >-
-          docker run --rm
-          -v ${{ github.workspace }}/tests/fixtures:/fixtures:ro
-          invariant-guardian:ci-test
-          assess --invariants /fixtures/invariants --diff /fixtures/temporary_monitoring.diff
-          | python -c "
-          import json, sys
-          d = json.load(sys.stdin)
-          assert d['status'] == 'candidates_require_judgment', f'Expected candidates_require_judgment, got {d[\"status\"]}'
-          assert len(d['candidates']) >= 1, f'Expected >=1 candidate, got {len(d[\"candidates\"])}'
-          assert any(c['invariant_id'] == 'no-temporary-monitoring' for c in d['candidates'])
-          assert d['coverage']['context_truncated'] == False
-          print('PASS: temporary_monitoring.diff → candidates_require_judgment')
-          "
+        run: |
+          docker run --rm -v ${{ github.workspace }}/tests/fixtures:/fixtures:ro invariant-guardian:ci-test assess --invariants /fixtures/invariants --diff /fixtures/temporary_monitoring.diff > /tmp/guardian-monitoring.json
+          python -c "import json; d=json.load(open('/tmp/guardian-monitoring.json')); assert d['status'] == 'candidates_require_judgment'; assert any(c['invariant_id'] == 'no-temporary-monitoring' for c in d['candidates']); assert not d['coverage']['context_truncated']; print('PASS: temporary-monitoring fixture')"
       - name: Run Action-runner integration tests
         run: python -m pytest tests/test_integration.py -o addopts='' -v
