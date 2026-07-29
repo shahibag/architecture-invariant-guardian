@@ -1,0 +1,10 @@
+--- a/src/main/java/com/example/DataPoller.java
++++ b/src/main/java/com/example/DataPoller.java
+@@ -1,0 +6,7 @@
++@Component
++class DataPoller {
++    @Scheduled(fixedDelay=5000)
++    public void poll() {
++        repository.save(new Record());
++    }
++}

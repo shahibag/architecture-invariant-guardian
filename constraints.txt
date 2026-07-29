@@ -1,0 +1,4 @@
+# Invariant Guardian v0.2 — Pinned dependency constraints
+# Single tested pair — exact version pins for reproducible builds
+tree-sitter==0.26.0
+tree-sitter-java==0.23.5

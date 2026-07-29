@@ -1,0 +1,17 @@
+--- a/src/main/java/com/example/ComplexController.java
++++ b/src/main/java/com/example/ComplexController.java
+@@ -1,14 +1,14 @@
+ import jakarta.persistence.Entity;
+ import org.springframework.web.bind.annotation.*;
+ @Entity
+ class OrderAggregate {}
+ @RestController
+ class ComplexController {
+     @GetMapping("/complex")
+     public OrderAggregate
++        getComplexOrder(
+             @RequestParam String id)
+             throws Exception {
+         return null;
+     }
+ }

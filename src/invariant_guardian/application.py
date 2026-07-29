@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
+import re
+from collections.abc import Callable
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from invariant_guardian.context import (
@@ -16,8 +18,10 @@ from invariant_guardian.context import (
 from invariant_guardian.domain.models import (
     Assessment,
     AssessmentStatus,
+    CandidateFinding,
     ChangedFile,
     Coverage,
+    CoverageGap,
     JudgeCandidate,
     JudgeRequest,
     JudgeResult,
@@ -26,10 +30,15 @@ from invariant_guardian.domain.models import (
 )
 from invariant_guardian.invariants import load_invariants
 from invariant_guardian.prompt import judge_message_chars
-from invariant_guardian.rules.java import detect_candidates
+from invariant_guardian.rules.java import (
+    detect_candidates,
+    detect_candidates_from_source,
+    extract_changed_lines_from_patch,
+    reconstruct_source_from_patch,
+)
 
 if TYPE_CHECKING:
-    from invariant_guardian.ports import LLMJudge
+    from invariant_guardian.ports import LLMJudge, SourceReader
 
 
 class ReviewEngine:
@@ -41,7 +50,10 @@ class ReviewEngine:
     """
 
     def assess(
-        self, request: ReviewRequest, judge: LLMJudge | None = None
+        self,
+        request: ReviewRequest,
+        judge: LLMJudge | None = None,
+        source_reader: SourceReader | None = None,
     ) -> Assessment:
         invariants = request.invariants
         changed_files = request.changed_files
@@ -78,7 +90,7 @@ class ReviewEngine:
             )
 
         # --- detect candidates from in-scope, evaluable files ---------------
-        candidates = []
+        candidates: list[CandidateFinding] = []
         # Map file → patch for bounded context extraction
         file_patches: dict[str, str] = {}
         for cf in changed_files[:MAX_CHANGED_FILES]:
@@ -107,8 +119,91 @@ class ReviewEngine:
                 continue
             normalised = _normalize_patch(cf.patch, norm)
             file_patches[norm] = normalised
-            # Only enable detectors for invariants whose scope includes this file
-            candidates.extend(detect_candidates(normalised, in_scope_ids))
+            # Phase 2: reconstruct Java source from the patch and use
+            # AST-based detection for structural accuracy.
+            # Phase 1 regex detection runs as a fallback when the patch
+            # lacks enough context for AST parsing, or when AST errors.
+            if norm.endswith(".java"):
+                ast_failed = False
+                try:
+                    # --- P0 finding 1: exact-source integrity -----------
+                    # When a SourceReader is available, prefer the exact
+                    # head SHA source.  Fall back to patch reconstruction
+                    # when the source is unavailable — with disjoint-hunk
+                    # detection keeping reconstruction safe.
+                    line_map = None
+                    source: str | None = None
+                    if source_reader is not None and hasattr(
+                        source_reader, "read_file_at_ref"
+                    ):
+                        raw = source_reader.read_file_at_ref(
+                            norm, request.head_sha
+                        )
+                        from invariant_guardian.context import read_source_safely
+
+                        source = read_source_safely(raw, norm)
+                        if source is None:
+                            raise ValueError(
+                                "Exact head-SHA source unavailable for structural analysis"
+                            )
+                        changed_lines = extract_changed_lines_from_patch(cf.patch)
+                        # Exact source: AST coordinates are new-file lines —
+                        # no reconstruction map is needed.
+                        line_map = None
+                    else:
+                        # Compatibility path for direct/local callers that do
+                        # not provide a SourceReader. Disjoint hunks are
+                        # rejected by reconstruction rather than concatenated.
+                        source, line_map = reconstruct_source_from_patch(cf.patch)
+                        changed_lines = extract_changed_lines_from_patch(cf.patch)
+                    type_resolver = _build_type_resolver(
+                        norm, request.head_sha, source_reader, source
+                    )
+                    ast_findings = detect_candidates_from_source(
+                        source,
+                        norm,
+                        changed_lines,
+                        in_scope_ids,
+                        source_to_new_line_map=line_map,
+                        source_reader=type_resolver,
+                    )
+                except Exception:  # noqa: BLE001 — AST must never crash the engine
+                    ast_failed = True
+                if ast_failed:
+                    # AST parsing/reconstruction failed — required structural
+                    # analysis is unavailable.  Record a coverage gap and
+                    # continue.  No regex fallback in production path.
+                    coverage.skipped_files.append(
+                        CoverageGap(
+                            file=norm,
+                            reason="Java AST parsing failed — structural analysis unavailable",
+                        )
+                    )
+                    coverage.context_truncated = True
+                # Check for unresolved naming-convention candidates that
+                # couldn't get their declaration via source_reader.  Missing
+                # declarations on naming-only candidates are coverage gaps.
+                for c in ast_findings if not ast_failed else []:
+                    if (
+                        c.invariant_id == "no-domain-leak"
+                        and c.confidence == "low"
+                        and c.related_evidence is None
+                    ):
+                        coverage.skipped_files.append(
+                            CoverageGap(
+                                file=norm,
+                                reason=f"Unresolved type declaration for {c.evidence[:120]}",
+                            )
+                        )
+                        coverage.context_truncated = True
+                        continue
+                    candidates.append(c)
+                # Production assessment never falls back to line-oriented
+                # regex detection.  A parser failure is already recorded as
+                # incomplete, while a valid AST with no finding is clean.
+                # The legacy assess_diff API retains its compatibility path.
+            else:
+                candidates.extend(detect_candidates(normalised, in_scope_ids))
 
         # Apply candidate count limit
         if len(candidates) > MAX_CANDIDATE_COUNT:
@@ -141,7 +236,19 @@ class ReviewEngine:
                     else f"Rule: {c.invariant_id}"
                 )
                 patch = file_patches.get(c.file, "")
-                context_hunk = _extract_bounded_context(patch, c.start_line) or c.evidence
+                context_hunk = (
+                    _extract_bounded_context(patch, c.start_line, c.end_line)
+                    or c.evidence
+                )
+                # --- P0 finding 1: judge context completeness ----------
+                # Include all deterministic evidence supporting the
+                # candidate — monitoring state-change evidence and
+                # related declarations must reach the judge.
+                evidence_lines: list[str] = [c.evidence]
+                if c.related_evidence:
+                    evidence_lines.append(
+                        f"Related declaration evidence:\n{c.related_evidence}"
+                    )
                 jc = JudgeCandidate(
                     index=i,
                     invariant_id=c.invariant_id,
@@ -149,8 +256,9 @@ class ReviewEngine:
                     file=c.file,
                     start_line=c.start_line,
                     end_line=c.end_line,
-                    evidence=c.evidence,
+                    evidence="\n".join(evidence_lines),
                     context_hunk=context_hunk,
+                    related_evidence=c.related_evidence,
                 )
                 # Enforce MAX_MODEL_CONTEXT_CHARS: measure the serialised size
                 # of all candidates accumulated so far.  If adding this
@@ -291,6 +399,130 @@ class ReviewEngine:
 
 
 # ---------------------------------------------------------------------------
+# Type-declaration resolution helper
+# ---------------------------------------------------------------------------
+
+def _build_type_resolver(
+    changed_file_path: str,
+    head_sha: str,
+    source_reader: object | None,
+    source: str,
+) -> Callable[[str], str | None] | None:
+    """Build a ``(type_name: str) -> str | None`` callable from the
+    :class:`~invariant_guardian.ports.SourceReader` port.
+
+    Resolution follows explicit/wildcard imports and the current package,
+    probing every known Java source root at the exact *head_sha*.
+    Cross-module imports (e.g. ``module-api`` importing from
+    ``module-domain``) are resolved by searching across all discovered
+    source roots rather than only the changed file's module.
+
+    P0 finding 1 / P1 finding 3: exact-head source + cross-module roots.
+    """
+    if source_reader is None:
+        return None
+    if not hasattr(source_reader, "read_file_at_ref"):
+        return None
+
+    read_file_at_ref = source_reader.read_file_at_ref
+    from invariant_guardian.context import read_source_safely
+
+    package_match = re.search(
+        r"(?m)^\s*package\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*;",
+        source,
+    )
+    package_name = package_match.group(1) if package_match else ""
+    imports = re.findall(
+        r"(?m)^\s*import\s+(?!static\s)([A-Za-z_$][\w$]*(?:\.[A-Za-z_$*][\w$*]*)*)\s*;",
+        source,
+    )
+
+    # --- Discover source roots (P1 finding 3) --------------------------
+    source_roots: list[str] = []
+
+    # Primary root: derive from the changed file's package/path
+    changed = PurePosixPath(changed_file_path)
+    package_parts = package_name.split(".") if package_name else []
+    changed_parts = list(changed.parts)
+    primary_root = changed.parent
+    if package_parts:
+        for idx in range(len(changed_parts) - len(package_parts)):
+            if changed_parts[idx : idx + len(package_parts)] == package_parts:
+                primary_root = PurePosixPath(*changed_parts[:idx])
+                break
+    source_roots.append(str(primary_root).lstrip("/"))
+
+    # Additional roots from the repository index (bounded)
+    source_index_unavailable = False
+    if hasattr(source_reader, "list_source_roots"):
+        try:
+            extra_roots = source_reader.list_source_roots(head_sha)
+        except Exception:  # noqa: BLE001 — untrusted adapter boundary
+            extra_roots = None
+        if isinstance(extra_roots, list) and len(extra_roots) <= 20:
+            for root in extra_roots:
+                if isinstance(root, str) and root and root not in source_roots:
+                    source_roots.append(root)
+        else:
+            # Missing, malformed, or over-budget indexes cannot prove a
+            # repository-wide declaration lookup is unique.
+            source_index_unavailable = True
+
+    def _resolve(type_name: str) -> str | None:
+        if source_index_unavailable:
+            return None
+        # Strip generic wrapper for resolution (P0 finding 2):
+        # "List<OrderEntity>" → resolve "OrderEntity"
+        simple = type_name.strip()
+        if "<" in simple:
+            # Extract the first type argument from generic containers
+            inner = simple.split("<", 1)[-1].rstrip(">")
+            # Use the inner type, falling back to the raw name
+            simple = inner.strip() or simple
+        simple = simple.split(".")[-1]
+        qualified_names: list[str] = []
+        if "." in type_name:
+            qualified_names.append(type_name)
+        for imported in imports:
+            if imported.endswith(f".{simple}"):
+                qualified_names.append(imported)
+            elif imported.endswith(".*"):
+                qualified_names.append(f"{imported[:-2]}.{simple}")
+        if package_name:
+            qualified_names.append(f"{package_name}.{simple}")
+        # Always include the bare simple name as fallback — catches
+        # same-package types when no package statement is present,
+        # and types imported by wildcard that don't live under the
+        # wildcard's package.
+        qualified_names.append(simple)
+
+        # Probe every source root for each qualified name. Multiple matches
+        # are ambiguous required evidence and therefore resolve to None.
+        matches: dict[str, str] = {}
+        for root in dict.fromkeys(source_roots):
+            for qualified in dict.fromkeys(qualified_names):
+                candidate_path = (
+                    str(PurePosixPath(root) / PurePosixPath(*qualified.split(".")))
+                    .lstrip("/")
+                    + ".java"
+                )
+                try:
+                    raw = read_file_at_ref(candidate_path, head_sha)
+                except Exception:  # noqa: BLE001 — source reader is untrusted
+                    raw = None
+                if raw is None:
+                    continue
+                decoded = read_source_safely(raw, candidate_path)
+                if decoded is not None:
+                    matches[candidate_path] = decoded
+        if len(matches) != 1:
+            return None
+        return next(iter(matches.values()))
+
+    return _resolve
+
+
+# ---------------------------------------------------------------------------
 # Patch normalisation — GitHub patches lack +++ b/<path> headers
 # ---------------------------------------------------------------------------
 
@@ -314,7 +546,9 @@ def _normalize_patch(patch: str, path: str) -> str:
 _CONTEXT_LINES = CONTEXT_LINES
 
 
-def _extract_bounded_context(patch: str, target_line: int) -> str:
+def _extract_bounded_context(
+    patch: str, target_line: int, supporting_line: int | None = None
+) -> str:
     """Extract a bounded diff hunk around *target_line* from *patch*.
 
     Returns at most the lines around the target plus ``_CONTEXT_LINES`` of
@@ -327,6 +561,10 @@ def _extract_bounded_context(patch: str, target_line: int) -> str:
     header: str | None = None
     hunk_lines: list[str] = []
     new_line: int | None = None
+    targets = {target_line}
+    if supporting_line is not None:
+        targets.add(supporting_line)
+    radius = _CONTEXT_LINES if len(targets) == 1 else _CONTEXT_LINES // 2
     max_body_lines = 2 * _CONTEXT_LINES + 1
     max_total_lines = max_body_lines + 1
 
@@ -349,7 +587,10 @@ def _extract_bounded_context(patch: str, target_line: int) -> str:
         if new_line is None:
             continue
 
-        if abs(new_line - target_line) <= _CONTEXT_LINES and len(hunk_lines) < max_body_lines:
+        if (
+            min(abs(new_line - target) for target in targets) <= radius
+            and len(hunk_lines) < max_body_lines
+        ):
             hunk_lines.append(line)
 
         if (line.startswith("+") and not line.startswith("+++")) or line.startswith(" "):

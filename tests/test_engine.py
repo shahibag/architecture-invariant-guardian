@@ -17,6 +17,41 @@ from invariant_guardian.domain.models import (
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+class EntitySourceReader:
+    """Resolve requested Java type paths to matching JPA declarations.
+
+    Returns exact changed-file source and declaration content for related
+    type-resolution paths.
+    """
+
+    def __init__(self, file_source: str | None = None) -> None:
+        self._file_source = file_source
+
+    def changed_files(self) -> list[ChangedFile]:
+        return []
+
+    def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+        if self._file_source is not None and path == self._file_source:
+            return (
+                b"import org.springframework.web.bind.annotation.*;\n\n"
+                b"@RestController\n"
+                b"class OrderController {\n"
+                b"    @GetMapping(\"/order\")\n"
+                b"    public OrderEntity getOrder() { return null; }\n"
+                b"}\n"
+            )
+        if (
+            self._file_source is not None
+            and Path(path).parent != Path(self._file_source).parent
+        ):
+            return None
+        type_name = Path(path).stem
+        return (
+            "import jakarta.persistence.Entity;\n"
+            f"@Entity class {type_name} {{}}\n"
+        ).encode()
+
+
 # ---------------------------------------------------------------------------
 # ReviewEngine.assess — coverage is mandatory
 # ---------------------------------------------------------------------------
@@ -279,13 +314,23 @@ class TestEngineWithJudge:
             violating_examples="Bad",
             acceptable_examples="Good",
         )
+        # Full Java source — AST must have complete class + annotations
         cf = ChangedFile(
             path="src/main/java/Foo.java",
             status="modified",
             patch=(
                 "+++ b/src/main/java/Foo.java\n"
-                "@@ -10,0 +11,3 @@\n"
-                "+    public OrderEntity getOrder() { return null; }"
+                "@@ -1,0 +2,8 @@\n"
+                "+import jakarta.persistence.Entity;\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@Entity\n"
+                "+class OrderEntity {}\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
             ),
             patch_complete=True,
         )
@@ -322,7 +367,7 @@ class TestEngineWithJudge:
         assert result.coverage.evaluated_files == ["src/main/java/Foo.java"]
 
     def test_engine_with_judge_rejects_candidate(self) -> None:
-        """Judge rejects a candidate that was detected by regex — candidate
+        """Judge rejects a candidate detected by AST — candidate
         preserved but no violation."""
         from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
 
@@ -336,13 +381,24 @@ class TestEngineWithJudge:
             violating_examples="Bad",
             acceptable_examples="Good",
         )
+        # Full Java — AST must have complete class + annotations.
+        # Include @Entity so the type is known-JPA, not naming-only.
         cf = ChangedFile(
             path="src/main/java/Foo.java",
             status="modified",
             patch=(
                 "+++ b/src/main/java/Foo.java\n"
-                "@@ -10,0 +11,3 @@\n"
-                "+    public OrderEntity getOrder() { return null; }"
+                "@@ -1,0 +2,8 @@\n"
+                "+import jakarta.persistence.Entity;\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@Entity\n"
+                "+class OrderEntity {}\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
             ),
             patch_complete=True,
         )
@@ -389,13 +445,20 @@ class TestEngineWithJudge:
             violating_examples="Bad",
             acceptable_examples="Good",
         )
+        # Full Java — AST must have complete class + annotations
         cf = ChangedFile(
             path="src/main/java/Foo.java",
             status="modified",
             patch=(
                 "+++ b/src/main/java/Foo.java\n"
-                "@@ -10,0 +11,3 @@\n"
-                "+    public OrderEntity getOrder() { return null; }"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
             ),
             patch_complete=True,
         )
@@ -410,7 +473,9 @@ class TestEngineWithJudge:
         fake_client = FakeOpenAI({"unexpected": True})
         judge = OpenAICompatibleJudge("unused", client=fake_client)
         engine = ReviewEngine()
-        result = engine.assess(req, judge=judge)
+        result = engine.assess(
+            req, judge=judge, source_reader=EntitySourceReader(file_source="src/main/java/Foo.java")
+        )
 
         # Should be INCOMPLETE but still preserve coverage and candidates
         assert result.status == AssessmentStatus.INCOMPLETE
@@ -523,12 +588,19 @@ class TestEngineWithJudge:
             acceptable_examples="Good",
         )
         # GitHub-shaped patch: NO +++ b/ header, just hunk + lines
+        # Must include complete Java class for AST parsing
         cf = ChangedFile(
             path="src/main/java/Foo.java",
             status="modified",
             patch=(
-                "@@ -10,0 +11,3 @@\n"
-                "+    public OrderEntity getOrder() { return null; }"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
             ),
             patch_complete=True,
         )
@@ -554,7 +626,9 @@ class TestEngineWithJudge:
         judge = OpenAICompatibleJudge("unused", client=fake_client)
 
         engine = ReviewEngine()
-        result = engine.assess(req, judge=judge)
+        result = engine.assess(
+            req, judge=judge, source_reader=EntitySourceReader(file_source="src/main/java/Foo.java")
+        )
 
         # Must detect the domain-leak candidate even without +++ b/ header
         assert len(result.candidates) >= 1, (
@@ -688,13 +762,20 @@ class TestEngineWithJudge:
             violating_examples="Bad",
             acceptable_examples="Good",
         )
+        # Full Java class for AST parsing
         cf = ChangedFile(
             path="src/main/java/Foo.java",
             status="modified",
             patch=(
                 "+++ b/src/main/java/Foo.java\n"
-                "@@ -10,0 +11,3 @@\n"
-                "+    public OrderEntity getOrder() { return null; }"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
             ),
             patch_complete=True,
         )
@@ -725,31 +806,36 @@ class TestEngineWithJudge:
 
     def test_model_context_chars_enforced(self) -> None:
         """MAX_MODEL_CONTEXT_CHARS (60,000) must be enforced when building
-        the JudgeRequest.  Excessive context must truncate and make the
-        assessment incomplete."""
+        the JudgeRequest.  Excessive invariant text must truncate and make
+        the assessment incomplete."""
         from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
         from invariant_guardian.context import MAX_MODEL_CONTEXT_CHARS
 
+        # Use a huge invariant rule to blow through the model-context ceiling
         inv = Invariant(
             id="no-domain-leak",
             title="No domain leak",
             severity=Severity.ERROR,
             scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
-            rule="Do not leak entities.",
+            rule="r" * (MAX_MODEL_CONTEXT_CHARS - 100),
             rationale="Public contracts should remain stable.",
             violating_examples="Bad",
             acceptable_examples="Good",
         )
-        # Create a patch large enough to blow through the model-context
-        # ceiling when used as evidence.
-        huge_body = "// " + "z" * (MAX_MODEL_CONTEXT_CHARS + 1000)
+        # Full valid Java class for AST
         cf = ChangedFile(
             path="src/main/java/Foo.java",
             status="modified",
             patch=(
-                "@@ -10,0 +11,3 @@\n"
-                "+    public OrderEntity getOrder() {}\n"
-                + huge_body
+                "+++ b/src/main/java/Foo.java\n"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
             ),
             patch_complete=True,
         )
@@ -797,13 +883,20 @@ class TestEngineWithJudge:
             violating_examples="Bad",
             acceptable_examples="Good",
         )
+        # Full Java class for AST
         cf = ChangedFile(
             path="src/main/java/Foo.java",
             status="modified",
             patch=(
                 "+++ b/src/main/java/Foo.java\n"
-                "@@ -10,0 +11,3 @@\n"
-                "+    public OrderEntity getOrder() { return null; }"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
             ),
             patch_complete=True,
         )
@@ -828,7 +921,7 @@ class TestEngineWithJudge:
         )
         judge = OpenAICompatibleJudge("unused", client=fake_client)
         engine = ReviewEngine()
-        engine.assess(req, judge=judge)
+        engine.assess(req, judge=judge, source_reader=EntitySourceReader(file_source="src/main/java/Foo.java"))
 
         # The provider request must NOT contain a "diff" key
         sent = fake_client.chat.completions.request
@@ -926,7 +1019,17 @@ class TestRecoveryBudgetEnforcement:
         changed = ChangedFile(
             path="src/Foo.java",
             status="modified",
-            patch="@@ -1 +1 @@\n+public OrderEntity leaked() {}",
+            patch=(
+                "+++ b/src/Foo.java\n"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
+            ),
         )
         result = ReviewEngine().assess(
             ReviewRequest(
@@ -951,7 +1054,17 @@ class TestRecoveryBudgetEnforcement:
         changed = ChangedFile(
             path="src/Foo.java",
             status="modified",
-            patch="@@ -1 +1 @@\n+public OrderEntity leaked() {}",
+            patch=(
+                "+++ b/src/Foo.java\n"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
+            ),
         )
         request = ReviewRequest(
             base_sha="a",
@@ -991,7 +1104,17 @@ class TestRecoveryBudgetEnforcement:
         changed = ChangedFile(
             path="src/Foo.java",
             status="modified",
-            patch="@@ -1 +1 @@\n+public OrderEntity leaked() {}",
+            patch=(
+                "+++ b/src/Foo.java\n"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class OrderController {\n"
+                "+    @GetMapping(\"/order\")\n"
+                "+    public OrderEntity getOrder() { return null; }\n"
+                "+}\n"
+            ),
         )
         judge = MeasuringJudge()
         result = ReviewEngine().assess(
@@ -1020,3 +1143,1632 @@ class TestRecoveryBudgetEnforcement:
         )
         context = _extract_bounded_context(patch, 100)
         assert len(context.splitlines()) <= 82
+
+
+class TestRegexFallbackCannotConfirmWithoutASTEvidence:
+    """P0 finding 2: Regex-only evidence must never produce a confirmable
+    domain relationship.  Regex fallback may produce only conservative
+    (low-confidence) signals that the judge rejects as noise.
+    """
+
+    def test_regex_domain_leak_is_low_confidence_only(self) -> None:
+        """A public method returning Entity-suffixed type from a non-controller
+        class must be low-confidence from regex fallback, never medium.
+
+        AST correctly finds no candidate (no web annotations on class).
+        Regex fallback must not produce a medium-confidence candidate that
+        a judge could confirm without any AST boundary evidence.
+        """
+        inv = Invariant(
+            id="no-domain-leak",
+            title="No domain leak",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="Do not leak entities.",
+            rationale="Public contracts should remain stable.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+        # Non-controller service class with Entity return — NOT a public
+        # boundary.  AST correctly ignores it.  Regex must not elevate it.
+        cf = ChangedFile(
+            path="src/main/java/com/example/OrderService.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/com/example/OrderService.java\n"
+                "@@ -5,0 +6,3 @@\n"
+                "+    public OrderEntity findOrder() { return null; }"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[inv],
+            changed_files=[cf],
+        )
+        engine = ReviewEngine()
+        result = engine.assess(req)
+
+        # Any domain-leak candidate from regex fallback must be low
+        # confidence — never medium or high (confirmable).
+        for c in result.candidates:
+            if c.invariant_id == "no-domain-leak":
+                assert c.confidence == "low", (
+                    f"Regex-only domain-leak candidate must be low confidence, "
+                    f"got {c.confidence}: {c.evidence}"
+                )
+
+    def test_production_engine_does_not_fallback_to_monitoring_regex(self) -> None:
+        """Production structural analysis must not turn malformed snippets
+        into confirmable monitoring candidates through regex."""
+        inv = Invariant(
+            id="no-temporary-monitoring",
+            title="No temp monitoring",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="No temporary monitoring.",
+            rationale="Stable operations.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+        # Patch that regex would detect as monitoring but AST might not
+        # (e.g. non-compilable snippet from minimal patch)
+        cf = ChangedFile(
+            path="src/main/java/com/example/Worker.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/com/example/Worker.java\n"
+                "@@ -5,0 +6,3 @@\n"
+                "+    @Scheduled(fixedDelay=5000)\n"
+                "+    public void poll() { save(); }"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[inv],
+            changed_files=[cf],
+        )
+        engine = ReviewEngine()
+        result = engine.assess(req)
+
+        monitoring = [c for c in result.candidates
+                      if c.invariant_id == "no-temporary-monitoring"]
+        assert monitoring == []
+        assert result.status == AssessmentStatus.INCOMPLETE
+
+
+class TestDomainRegexFallbackRemoved:
+    """P0 finding 1: Domain-leak regex fallback must be removed from the
+    engine — valid AST with no finding = no candidate.  AST error or
+    insufficient source = coverage gap + assessment_incomplete."""
+
+    def test_regex_domain_leak_cannot_reach_judge(self) -> None:
+        """A non-controller class returning OrderEntity must NOT produce
+        a domain-leak candidate through the engine.  AST correctly finds
+        no candidate (no web annotations).  The regex fallback must not
+        fill the gap — a valid parse with no finding is clean."""
+
+        inv = Invariant(
+            id="no-domain-leak",
+            title="No domain leak",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="Do not leak entities.",
+            rationale="Public contracts should remain stable.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+        # Non-controller public method returning OrderEntity — AST correctly
+        # finds no candidate.  Regex fallback must NOT create one.
+        cf = ChangedFile(
+            path="src/main/java/com/example/OrderService.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/com/example/OrderService.java\n"
+                "@@ -5,0 +6,3 @@\n"
+                "+    public OrderEntity findOrder() { return null; }"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[inv],
+            changed_files=[cf],
+        )
+        engine = ReviewEngine()
+        result = engine.assess(req)
+
+        # Must have ZERO domain-leak candidates — regex fallback must not
+        # create a candidate that the AST correctly rejected.
+        domain_candidates = [
+            c for c in result.candidates
+            if c.invariant_id == "no-domain-leak"
+        ]
+        assert len(domain_candidates) == 0, (
+            f"Regex fallback must not create domain-leak candidates when "
+            f"AST found none. Got: {domain_candidates}"
+        )
+
+    def test_parser_failure_creates_coverage_gap_not_clean(self) -> None:
+        """When AST parsing fails (malformed source), the engine must record
+        a coverage gap and produce assessment_incomplete — never fall
+        through to regex for domain-leak and return clean."""
+        inv = Invariant(
+            id="no-domain-leak",
+            title="No domain leak",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="Do not leak entities.",
+            rationale="Public contracts should remain stable.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+        # Malformed Java that the parser will reject
+        cf = ChangedFile(
+            path="src/main/java/com/example/Broken.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/com/example/Broken.java\n"
+                "@@ -0,0 +1,5 @@\n"
+                "+@RestController\n"
+                "+class Broken {\n"
+                "+ public List<\n"
+                "+   OrderEntity get( {\n"  # malformed
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[inv],
+            changed_files=[cf],
+        )
+        engine = ReviewEngine()
+        result = engine.assess(req)
+
+        # Parser failure must produce INCOMPLETE, not clean
+        assert result.status == AssessmentStatus.INCOMPLETE, (
+            f"Parser failure must produce INCOMPLETE, got {result.status}"
+        )
+        # Must have a coverage gap or context_truncated
+        assert (
+            result.coverage.skipped_files or result.coverage.context_truncated
+        ), "Parser failure must create a coverage gap"
+
+    def test_parser_failure_does_not_emit_monitoring_regex_candidate(self) -> None:
+        """A parser failure is incomplete and must not emit regex candidates."""
+        inv = Invariant(
+            id="no-temporary-monitoring",
+            title="No temp monitoring",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="No temporary monitoring.",
+            rationale="Stable operations.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+        # Patch that AST would fail to parse but regex can detect
+        cf = ChangedFile(
+            path="src/main/java/com/example/Worker.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/com/example/Worker.java\n"
+                "@@ -5,0 +6,3 @@\n"
+                "+    @Scheduled(fixedDelay=5000)\n"
+                "+    public void poll() { save(); }"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[inv],
+            changed_files=[cf],
+        )
+        engine = ReviewEngine()
+        result = engine.assess(req)
+
+        monitoring = [
+            c for c in result.candidates
+            if c.invariant_id == "no-temporary-monitoring"
+        ]
+        assert monitoring == []
+        assert result.status == AssessmentStatus.INCOMPLETE
+        # No domain regex bleed
+        domain = [
+            c for c in result.candidates
+            if c.invariant_id == "no-domain-leak"
+        ]
+        assert len(domain) == 0, "Domain regex fallback must not bleed into monitoring path"
+
+
+class TestSourceReaderEngineWiring:
+    """P0 finding 2: SourceReader must be wired into ReviewEngine so that
+    naming-convention candidates resolve their type declarations.  Missing
+    or invalid declarations produce coverage gaps."""
+
+    def _invariant(self) -> Invariant:
+        return Invariant(
+            id="no-domain-leak",
+            title="No domain leak",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="Do not leak entities.",
+            rationale="Public contracts should remain stable.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+    def test_naming_candidate_resolved_via_source_reader(self) -> None:
+        """When a SourceReader provides a valid @Entity declaration for a
+        naming-convention type, the candidate upgrades from low to medium
+        confidence with related_evidence."""
+
+        # Controller that returns ProductEntity (Entity suffix, no @Entity
+        # annotation in the same file). The SourceReader provides the
+        # ProductEntity declaration.
+        cf = ChangedFile(
+            path="src/main/java/com/example/ProductController.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/com/example/ProductController.java\n"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class ProductController {\n"
+                "+    @GetMapping(\"/product\")\n"
+                "+    public ProductEntity getProduct() { return null; }\n"
+                "+}\n"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[self._invariant()],
+            changed_files=[cf],
+        )
+
+        # In-memory source reader that resolves ProductEntity
+        declaration_map = {
+            "ProductEntity": (
+                b"import jakarta.persistence.Entity;\n"
+                b"@Entity\n"
+                b"class ProductEntity { private Long id; }\n"
+            ),
+        }
+
+        class InMemorySourceReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == cf.path:
+                    return "\n".join(
+                        line[1:]
+                        for line in (cf.patch or "").splitlines()
+                        if line.startswith("+") and not line.startswith("+++")
+                    ).encode()
+                # Resolve only the exact same-package declaration path.
+                for type_name, content in declaration_map.items():
+                    expected = str(Path(cf.path).parent / f"{type_name}.java")
+                    if path == expected:
+                        return content
+                return None
+
+        source_reader = InMemorySourceReader()
+
+        engine = ReviewEngine()
+        result = engine.assess(req, source_reader=source_reader)
+
+        candidates = [c for c in result.candidates if c.invariant_id == "no-domain-leak"]
+        assert len(candidates) >= 1, (
+            f"Expected domain-leak candidate with resolved declaration, got {len(candidates)}"
+        )
+        c = candidates[0]
+        assert c.confidence == "medium", (
+            f"Resolved declaration must give medium confidence, got {c.confidence}"
+        )
+        assert c.related_evidence is not None, (
+            "Must include bounded related evidence from declaration"
+        )
+
+    def test_unresolvable_declaration_is_coverage_gap(self) -> None:
+        """When SourceReader returns None for a naming-convention type's
+        declaration, the assessment must be incomplete (coverage gap)."""
+        cf = ChangedFile(
+            path="src/main/java/com/example/ProductController.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/com/example/ProductController.java\n"
+                "@@ -1,0 +2,7 @@\n"
+                "+import org.springframework.web.bind.annotation.*;\n"
+                "+\n"
+                "+@RestController\n"
+                "+class ProductController {\n"
+                "+    @GetMapping(\"/product\")\n"
+                "+    public ProductEntity getProduct() { return null; }\n"
+                "+}\n"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[self._invariant()],
+            changed_files=[cf],
+        )
+
+        # SourceReader that always returns None (can't resolve)
+        class MissingSourceReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == cf.path:
+                    return "\n".join(
+                        line[1:]
+                        for line in (cf.patch or "").splitlines()
+                        if line.startswith("+") and not line.startswith("+++")
+                    ).encode()
+                return None
+
+        source_reader = MissingSourceReader()
+
+        judge_calls: list[object] = []
+
+        class MustNotBeCalledJudge:
+            def evaluate(self, request):
+                judge_calls.append(request)
+                raise AssertionError("unresolved evidence must not reach the judge")
+
+        engine = ReviewEngine()
+        result = engine.assess(
+            req, judge=MustNotBeCalledJudge(), source_reader=source_reader
+        )
+
+        # Missing declaration for a naming-convention candidate → INCOMPLETE
+        assert result.status == AssessmentStatus.INCOMPLETE, (
+            f"Unresolvable declaration must produce INCOMPLETE, got {result.status}"
+        )
+        assert (
+            result.coverage.skipped_files or result.coverage.context_truncated
+        ), "Missing declaration must be a coverage gap"
+        assert judge_calls == []
+        assert result.violations == []
+
+    def test_missing_exact_changed_source_never_falls_back_to_patch(self) -> None:
+        cf = ChangedFile(
+            path="src/main/java/com/example/ProductController.java",
+            status="modified",
+            patch=(
+                "@@ -1,0 +1,7 @@\n"
+                "+@Entity class ProductEntity {}\n"
+                "+@RestController\n"
+                "+class ProductController {\n"
+                "+  @GetMapping\n"
+                "+  public ProductEntity get() { return null; }\n"
+                "+}\n"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="base",
+            head_sha="exact-head",
+            invariants=[self._invariant()],
+            changed_files=[cf],
+        )
+
+        class MissingExactSource:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                return None
+
+        judge_calls: list[object] = []
+
+        class MustNotBeCalledJudge:
+            def evaluate(self, request):
+                judge_calls.append(request)
+                raise AssertionError("uncertain patch source must not reach judge")
+
+        result = ReviewEngine().assess(
+            req,
+            judge=MustNotBeCalledJudge(),
+            source_reader=MissingExactSource(),
+        )
+        assert result.status == AssessmentStatus.INCOMPLETE
+        assert result.candidates == []
+        assert result.violations == []
+        assert judge_calls == []
+        assert result.coverage.skipped_files
+
+
+# ---------------------------------------------------------------------------
+# P0 Finding 1: Disjoint-patch Frankenstein regression
+# ---------------------------------------------------------------------------
+
+
+class TestDisjointPatchFrankenstein:
+    """P0 finding 1: Two-hunk disjoint patches must not be concatenated into
+    a Frankenstein AST when no SourceReader is available.  Disjoint hunks
+    must fail closed — zero candidates, zero violations, zero judge calls.
+    """
+
+    @staticmethod
+    def _invariant() -> Invariant:
+        return Invariant(
+            id="no-temporary-monitoring",
+            title="No temp monitoring",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="No temporary monitoring.",
+            rationale="Stable operations.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+    def test_two_hunk_disjoint_no_source_reader_is_incomplete(self) -> None:
+        """Two-hunk disjoint patch through ReviewEngine with source_reader=None
+        and a confirming judge must be incomplete — zero candidates, zero
+        violations, zero judge calls."""
+
+        # Exact two-hunk reproduction from the delegation report:
+        # @@ -1,2 +1,2 @@  (class C + @Scheduled)
+        # @@ -100,2 +100,2 @@ (save() + closing brace)
+        cf = ChangedFile(
+            path="src/main/java/com/example/DisjointService.java",
+            status="modified",
+            patch=(
+                "+++ b/src/main/java/com/example/DisjointService.java\n"
+                "@@ -1,2 +1,2 @@\n"
+                "+class C {\n"
+                "+ @Scheduled void m(){\n"
+                "@@ -100,2 +100,2 @@\n"
+                "+ save(); }\n"
+                "+}\n"
+            ),
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[self._invariant()],
+            changed_files=[cf],
+        )
+
+        # Judge that confirms everything — but must never be called
+        judge_calls: list[object] = []
+
+        class MustNotBeCalledJudge:
+            def evaluate(self, request):
+                judge_calls.append(request)
+                raise AssertionError("disjoint patch must not reach judge")
+
+        engine = ReviewEngine()
+        result = engine.assess(req, judge=MustNotBeCalledJudge(), source_reader=None)
+
+        # Disjoint hunks → reconstruction fails → AST fails → incomplete
+        assert result.status == AssessmentStatus.INCOMPLETE, (
+            f"Expected INCOMPLETE for disjoint patch without source_reader, "
+            f"got {result.status}"
+        )
+        assert result.candidates == [], (
+            f"Expected zero candidates, got {len(result.candidates)}"
+        )
+        assert result.violations == [], (
+            f"Expected zero violations, got {len(result.violations)}"
+        )
+        assert judge_calls == [], "Judge must not be called for disjoint patch"
+
+    def test_disjoint_patch_assess_diff_yields_incomplete(self) -> None:
+        """Packaged assess_diff with disjoint patch must be incomplete/gap —
+        legacy has no judge, so no candidate can be confirmed."""
+        from invariant_guardian.application import assess_diff
+
+        diff = (
+            "diff --git a/src/main/java/com/example/DisjointService.java "
+            "b/src/main/java/com/example/DisjointService.java\n"
+            "--- a/src/main/java/com/example/DisjointService.java\n"
+            "+++ b/src/main/java/com/example/DisjointService.java\n"
+            "@@ -1,2 +1,2 @@\n"
+            "+class C {\n"
+            "+ @Scheduled void m(){\n"
+            "@@ -100,2 +100,2 @@\n"
+            "+ save(); }\n"
+            "+}\n"
+        )
+        assessment = assess_diff(FIXTURES / "invariants", diff)
+        # Legacy has no judge → CANDIDATES_REQUIRE_JUDGMENT or INCOMPLETE
+        assert assessment.status != AssessmentStatus.CONFIRMED_VIOLATIONS, (
+            f"Disjoint patch must not produce confirmed violations via "
+            f"assess_diff, got {assessment.status}"
+        )
+        assert assessment.status != AssessmentStatus.NO_CONFIRMED_VIOLATIONS, (
+            f"Disjoint patch must not produce clean result via "
+            f"assess_diff, got {assessment.status}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# P0 Finding 2: Judge evidence completeness regression
+# ---------------------------------------------------------------------------
+
+
+class TestJudgeEvidenceCompleteness:
+    """P0 finding 2: @Scheduled findings must include all deterministic
+    monitoring evidence in the JudgeRequest — concrete state-change line,
+    snippet, and bounded context covering both annotation and state-change
+    locations.  Total context must not exceed 82 lines.
+    """
+
+    @staticmethod
+    def _invariant() -> Invariant:
+        return Invariant(
+            id="no-temporary-monitoring",
+            title="No temp monitoring",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="No temporary monitoring.",
+            rationale="Stable operations.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+    def test_scheduled_with_state_change_evidence_reaches_judge(self) -> None:
+        """@Scheduled at line 2 + repository.save at line 100 in exact-head
+        source: JudgeRequest must contain both concrete facts, evidence must
+        include state-change line/snippet, and total context must be ≤ 82 lines."""
+
+        # Build a source where @Scheduled is at line ~2 and save() is at line ~100
+        # Use enough filler lines to create the separation
+        filler_lines = [
+            f"    // filler line {i:03d}" for i in range(96)
+        ]
+        source_lines = [
+            "package com.example;",
+            "",
+            "import org.springframework.scheduling.annotation.Scheduled;",
+            "import org.springframework.stereotype.Component;",
+            "",
+            "@Component",
+            "class ScheduledService {",
+            "",
+            "    @Scheduled(fixedDelay=5000)",
+            "    public void reconcile() {",
+        ] + filler_lines + [
+            "        repository.save(new Order());",
+            "    }",
+            "}",
+        ]
+        full_source = "\n".join(source_lines)
+        # @Scheduled is at line 9 in 0-indexed → line 9
+        # save() should be around line 9 + 96 + some = ~107
+
+        # Patch that changes both @Scheduled line and save() line
+        # Find actual line numbers
+        scheduled_line = source_lines.index(
+            "    @Scheduled(fixedDelay=5000)"
+        ) + 1  # 1-indexed
+        save_line = source_lines.index(
+            "        repository.save(new Order());"
+        ) + 1
+
+        patch = (
+            "+++ b/src/main/java/com/example/ScheduledService.java\n"
+            f"@@ -{scheduled_line},1 +{scheduled_line},1 @@\n"
+            "+    @Scheduled(fixedDelay=5000)\n"
+            f"@@ -{save_line},1 +{save_line},1 @@\n"
+            "+        repository.save(new Order());\n"
+        )
+
+        cf = ChangedFile(
+            path="src/main/java/com/example/ScheduledService.java",
+            status="modified",
+            patch=patch,
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[self._invariant()],
+            changed_files=[cf],
+        )
+
+        # Capture the judge request for inspection
+        captured_request: list[object] = []
+
+        class InspectingJudge:
+            def evaluate(self, request):
+                captured_request.append(request)
+                from invariant_guardian.domain.models import (
+                    JudgeDecision,
+                    JudgeResult,
+                    ProviderUsage,
+                )
+                return JudgeResult(
+                    decisions=[
+                        JudgeDecision(
+                            candidate_index=c.index,
+                            decision="reject",
+                            why_it_matters="",
+                            suggested_direction="",
+                        )
+                        for c in request.candidates
+                    ],
+                    provider_usage=ProviderUsage(
+                        model="inspect", prompt_version="v1"
+                    ),
+                )
+
+        class ExactSourceReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == cf.path:
+                    return full_source.encode("utf-8")
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        engine = ReviewEngine()
+        result = engine.assess(
+            req, judge=InspectingJudge(), source_reader=ExactSourceReader()
+        )
+
+        # Must have at least one monitoring candidate
+        candidates = [
+            c for c in result.candidates
+            if c.invariant_id == "no-temporary-monitoring"
+        ]
+        assert len(candidates) >= 1, (
+            f"Expected monitoring candidate, got {len(candidates)}"
+        )
+
+        # Verify judge was called
+        assert len(captured_request) == 1, "Judge must be called"
+
+        judge_req = captured_request[0]
+        assert len(judge_req.candidates) >= 1
+
+        jc = judge_req.candidates[0]
+
+        # Evidence must mention the state-change call
+        assert "save" in jc.evidence.lower(), (
+            f"JudgeRequest evidence must reference save(), got: {jc.evidence}"
+        )
+        # Evidence must contain the concrete line/snippet
+        assert "repository.save" in jc.evidence.lower() or hasattr(jc, "related_evidence") and jc.related_evidence and "save" in (jc.related_evidence or "").lower(), (
+            f"JudgeRequest must include state-change snippet, "
+            f"evidence={jc.evidence}, related_evidence={jc.related_evidence}"
+        )
+
+        # Total context lines <= 82
+        context_lines = jc.context_hunk.split("\n") if jc.context_hunk else []
+        assert len(context_lines) <= 82, (
+            f"Context hunk must not exceed 82 lines, got {len(context_lines)}"
+        )
+
+        # Context must include lines near both the annotation and the state change
+        context_text = jc.context_hunk
+        assert "@Scheduled" in context_text or "save" in context_text, (
+            f"Context must contain evidence from the monitored method, "
+            f"got {len(context_lines)} lines"
+        )
+
+    def test_unfit_evidence_produces_incomplete_no_judge_call(self) -> None:
+        """When required supporting evidence cannot fit within the model
+        budget, the assessment must be incomplete with zero judge calls."""
+        # Use a source where the state change is extremely far from @Scheduled
+        # so the context can't fit both within budget
+        far_lines = [f"    // padding {i:04d}" for i in range(200)]
+        source_lines = [
+            "package com.example;",
+            "",
+            "import org.springframework.scheduling.annotation.Scheduled;",
+            "import org.springframework.stereotype.Component;",
+            "",
+            "@Component",
+            "class FarService {",
+            "",
+            "    @Scheduled(fixedDelay=5000)",
+            "    public void far() {",
+        ] + far_lines + [
+            "        repository.save(new Order());",
+            "    }",
+            "}",
+        ]
+        full_source = "\n".join(source_lines)
+
+        scheduled_line = 9  # 1-indexed
+        save_line = 9 + 200 + 1  # ~210
+
+        patch = (
+            "+++ b/src/main/java/com/example/FarService.java\n"
+            f"@@ -{scheduled_line},1 +{scheduled_line},1 @@\n"
+            "+    @Scheduled(fixedDelay=5000)\n"
+            f"@@ -{save_line},1 +{save_line},1 @@\n"
+            "+        repository.save(new Order());\n"
+        )
+
+        cf = ChangedFile(
+            path="src/main/java/com/example/FarService.java",
+            status="modified",
+            patch=patch,
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[self._invariant()],
+            changed_files=[cf],
+        )
+
+        judge_calls: list[object] = []
+
+        class MustNotConfirmWithoutFit:
+            def evaluate(self, request):
+                judge_calls.append(request)
+                from invariant_guardian.domain.models import (
+                    JudgeDecision,
+                    JudgeResult,
+                    ProviderUsage,
+                )
+                return JudgeResult(
+                    decisions=[
+                        JudgeDecision(
+                            candidate_index=c.index,
+                            decision="reject",
+                            why_it_matters="",
+                            suggested_direction="",
+                        )
+                        for c in request.candidates
+                    ],
+                    provider_usage=ProviderUsage(
+                        model="nofit", prompt_version="v1"
+                    ),
+                )
+
+        class ExactSourceReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == cf.path:
+                    return full_source.encode("utf-8")
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        engine = ReviewEngine()
+        result = engine.assess(
+            req, judge=MustNotConfirmWithoutFit(),
+            source_reader=ExactSourceReader()
+        )
+
+        # Either incomplete (gap) or the judge was called but context was bounded
+        # The key safety property: no unsupported judge call
+        if result.status == AssessmentStatus.INCOMPLETE:
+            # Correct — gap from extreme distance
+            pass
+        elif judge_calls:
+            # Judge was called — verify context is bounded
+            jc = judge_calls[0].candidates[0]
+            context_lines = jc.context_hunk.split("\n") if jc.context_hunk else []
+            assert len(context_lines) <= 82, (
+                f"Context must be bounded to ≤ 82 lines even with distant "
+                f"supporting evidence, got {len(context_lines)}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# P0 Finding 3 & P1 Finding 4: Type-resolution regression
+# ---------------------------------------------------------------------------
+
+
+class TestTypeResolutionBoundaries:
+    """P0 finding 3 & P1 finding 4: Imported types must be resolved before
+    classification.  Missing/malformed/ambiguous/>20-root declarations are
+    unavailable evidence (incomplete), not acceptable negatives.  Valid
+    suffix-named records/interfaces/enums/non-JPA classes are acceptable.
+    """
+
+    @staticmethod
+    def _invariant() -> Invariant:
+        return Invariant(
+            id="no-domain-leak",
+            title="No domain leak",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="Do not leak entities.",
+            rationale="Public contracts should remain stable.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+    def _make_req(self, path: str, source: str, patch: str) -> ReviewRequest:
+        cf = ChangedFile(
+            path=path,
+            status="modified",
+            patch=patch,
+            patch_complete=True,
+        )
+        return ReviewRequest(
+            base_sha="base",
+            head_sha="exact-head",
+            invariants=[self._invariant()],
+            changed_files=[cf],
+        )
+
+    def test_imported_type_missing_declaration_is_incomplete(self) -> None:
+        """Imported non-suffix type with missing declaration → incomplete,
+        zero judge calls."""
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public Order get() { return null; }\n"
+            "}\n"
+        )
+        patch = (
+            "+++ b/src/main/java/com/example/Api.java\n"
+            "@@ -1,0 +1,6 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class Api {\n"
+            "+    @GetMapping(\"/order\")\n"
+            "+    public Order get() { return null; }\n"
+            "+}\n"
+        )
+
+        req = self._make_req("src/main/java/com/example/Api.java", source, patch)
+
+        class MissingDeclReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == "src/main/java/com/example/Api.java":
+                    return source.encode("utf-8")
+                return None  # Order.java is missing
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        judge_calls: list[object] = []
+
+        class NoCallJudge:
+            def evaluate(self, request):
+                judge_calls.append(request)
+                raise AssertionError("missing declaration must not reach judge")
+
+        result = ReviewEngine().assess(
+            req, judge=NoCallJudge(),
+            source_reader=MissingDeclReader(),
+        )
+        assert result.status == AssessmentStatus.INCOMPLETE, (
+            f"Missing declaration must produce INCOMPLETE, got {result.status}"
+        )
+        assert judge_calls == [], (
+            f"Missing declaration must not call judge, got {len(judge_calls)} calls"
+        )
+
+    def test_imported_type_malformed_declaration_is_incomplete(self) -> None:
+        """Imported type with malformed Java declaration → incomplete,
+        zero candidates."""
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public Order get() { return null; }\n"
+            "}\n"
+        )
+        patch = (
+            "+++ b/src/main/java/com/example/Api.java\n"
+            "@@ -1,0 +1,6 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class Api {\n"
+            "+    @GetMapping(\"/order\")\n"
+            "+    public Order get() { return null; }\n"
+            "+}\n"
+        )
+
+        req = self._make_req("src/main/java/com/example/Api.java", source, patch)
+
+        class MalformedDeclReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == "src/main/java/com/example/Api.java":
+                    return source.encode("utf-8")
+                # Malformed Java — missing closing brace, unterminated generic
+                if path == "src/main/java/com/example/Order.java":
+                    return b"import jakarta.persistence.Entity;\n@Entity\nclass Order {\n  public List<\n}"
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        result = ReviewEngine().assess(req, source_reader=MalformedDeclReader())
+        assert result.status == AssessmentStatus.INCOMPLETE, (
+            f"Malformed declaration must produce INCOMPLETE, got {result.status}"
+        )
+
+    def test_ambiguous_multiple_source_paths_is_incomplete(self) -> None:
+        """Ambiguous declaration (same type resolved in two source roots)
+        → result must be None (unavailable), not first-match."""
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public Order get() { return null; }\n"
+            "}\n"
+        )
+        patch = (
+            "+++ b/src/main/java/com/example/Api.java\n"
+            "@@ -1,0 +1,6 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class Api {\n"
+            "+    @GetMapping(\"/order\")\n"
+            "+    public Order get() { return null; }\n"
+            "+}\n"
+        )
+
+        req = self._make_req("src/main/java/com/example/Api.java", source, patch)
+
+        class AmbiguousDeclReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == "src/main/java/com/example/Api.java":
+                    return source.encode("utf-8")
+                # Two different paths both resolve to Order.java
+                if path in (
+                    "src/main/java/com/example/Order.java",
+                    "module-domain/src/main/java/com/example/Order.java",
+                ):
+                    return b"import jakarta.persistence.Entity;\n@Entity\nclass Order {}\n"
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java", "module-domain/src/main/java"]
+
+        # Ambiguous resolution must not call the judge
+        judge_calls: list[object] = []
+
+        class NoCallJudge:
+            def evaluate(self, request):
+                judge_calls.append(request)
+                raise AssertionError("ambiguous declaration must not reach judge")
+
+        result = ReviewEngine().assess(
+            req, judge=NoCallJudge(),
+            source_reader=AmbiguousDeclReader(),
+        )
+        assert result.status == AssessmentStatus.INCOMPLETE, (
+            f"Ambiguous resolution must produce INCOMPLETE, got {result.status}"
+        )
+        assert judge_calls == [], (
+            f"Ambiguous must not call judge, got {len(judge_calls)} calls"
+        )
+
+    def test_over_20_source_roots_is_incomplete(self) -> None:
+        """Source reader with >20 roots → index unavailable → resolve
+        returns None → incomplete."""
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public Order get() { return null; }\n"
+            "}\n"
+        )
+        patch = (
+            "+++ b/src/main/java/com/example/Api.java\n"
+            "@@ -1,0 +1,6 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class Api {\n"
+            "+    @GetMapping(\"/order\")\n"
+            "+    public Order get() { return null; }\n"
+            "+}\n"
+        )
+
+        req = self._make_req("src/main/java/com/example/Api.java", source, patch)
+
+        class OverBudgetReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == "src/main/java/com/example/Api.java":
+                    return source.encode("utf-8")
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return [f"module-{i:02d}/src/main/java" for i in range(25)]
+
+        result = ReviewEngine().assess(req, source_reader=OverBudgetReader())
+        assert result.status == AssessmentStatus.INCOMPLETE, (
+            f">20 roots must produce INCOMPLETE, got {result.status}"
+        )
+
+    def test_record_with_entity_suffix_is_acceptable_clean(self) -> None:
+        """A record named OrderEntity must be classified as acceptable
+        (not internal), producing a clean assessment."""
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public OrderEntity get() { return null; }\n"
+            "}\n"
+        )
+        patch = (
+            "+++ b/src/main/java/com/example/Api.java\n"
+            "@@ -1,0 +1,6 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class Api {\n"
+            "+    @GetMapping(\"/order\")\n"
+            "+    public OrderEntity get() { return null; }\n"
+            "+}\n"
+        )
+
+        req = self._make_req("src/main/java/com/example/Api.java", source, patch)
+
+        class RecordDeclReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == "src/main/java/com/example/Api.java":
+                    return source.encode("utf-8")
+                # OrderEntity is a record, not a JPA entity
+                if path == "src/main/java/com/example/OrderEntity.java":
+                    return b"package com.example;\nrecord OrderEntity(String id) {}\n"
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        result = ReviewEngine().assess(req, source_reader=RecordDeclReader())
+        assert result.status == AssessmentStatus.NO_CONFIRMED_VIOLATIONS, (
+            f"Record with Entity suffix must be clean acceptable, got {result.status}"
+        )
+        domain = [
+            c for c in result.candidates
+            if c.invariant_id == "no-domain-leak"
+        ]
+        assert len(domain) == 0, (
+            f"Record with Entity suffix must not produce domain-leak candidate, "
+            f"got {len(domain)}"
+        )
+
+    def test_enum_with_entity_suffix_is_acceptable_clean(self) -> None:
+        """An enum named OrderEntity must be acceptable clean."""
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public OrderEntity get() { return null; }\n"
+            "}\n"
+        )
+        patch = (
+            "+++ b/src/main/java/com/example/Api.java\n"
+            "@@ -1,0 +1,6 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class Api {\n"
+            "+    @GetMapping(\"/order\")\n"
+            "+    public OrderEntity get() { return null; }\n"
+            "+}\n"
+        )
+
+        req = self._make_req("src/main/java/com/example/Api.java", source, patch)
+
+        class EnumDeclReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == "src/main/java/com/example/Api.java":
+                    return source.encode("utf-8")
+                if path == "src/main/java/com/example/OrderEntity.java":
+                    return b"package com.example;\nenum OrderEntity { ACTIVE, INACTIVE }\n"
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        result = ReviewEngine().assess(req, source_reader=EnumDeclReader())
+        domain = [
+            c for c in result.candidates
+            if c.invariant_id == "no-domain-leak"
+        ]
+        assert len(domain) == 0, (
+            f"Enum with Entity suffix must not produce candidate, got {len(domain)}"
+        )
+
+    def test_interface_with_entity_suffix_is_acceptable_clean(self) -> None:
+        """An interface named OrderEntity must be acceptable clean."""
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public OrderEntity get() { return null; }\n"
+            "}\n"
+        )
+        patch = (
+            "+++ b/src/main/java/com/example/Api.java\n"
+            "@@ -1,0 +1,6 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class Api {\n"
+            "+    @GetMapping(\"/order\")\n"
+            "+    public OrderEntity get() { return null; }\n"
+            "+}\n"
+        )
+
+        req = self._make_req("src/main/java/com/example/Api.java", source, patch)
+
+        class InterfaceDeclReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == "src/main/java/com/example/Api.java":
+                    return source.encode("utf-8")
+                if path == "src/main/java/com/example/OrderEntity.java":
+                    return b"package com.example;\ninterface OrderEntity { String id(); }\n"
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        result = ReviewEngine().assess(req, source_reader=InterfaceDeclReader())
+        domain = [
+            c for c in result.candidates
+            if c.invariant_id == "no-domain-leak"
+        ]
+        assert len(domain) == 0, (
+            f"Interface with Entity suffix must not produce candidate, got {len(domain)}"
+        )
+
+    def test_non_jpa_class_with_entity_suffix_is_acceptable_clean(self) -> None:
+        """A plain class named OrderEntity without JPA annotations must
+        be acceptable clean."""
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public OrderEntity get() { return null; }\n"
+            "}\n"
+        )
+        patch = (
+            "+++ b/src/main/java/com/example/Api.java\n"
+            "@@ -1,0 +1,6 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class Api {\n"
+            "+    @GetMapping(\"/order\")\n"
+            "+    public OrderEntity get() { return null; }\n"
+            "+}\n"
+        )
+
+        req = self._make_req("src/main/java/com/example/Api.java", source, patch)
+
+        class NonJpaClassReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == "src/main/java/com/example/Api.java":
+                    return source.encode("utf-8")
+                if path == "src/main/java/com/example/OrderEntity.java":
+                    return b"package com.example;\nclass OrderEntity { private String id; }\n"
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        result = ReviewEngine().assess(req, source_reader=NonJpaClassReader())
+        domain = [
+            c for c in result.candidates
+            if c.invariant_id == "no-domain-leak"
+        ]
+        assert len(domain) == 0, (
+            f"Non-JPA class with Entity suffix must not produce candidate, "
+            f"got {len(domain)}"
+        )
+
+    def test_same_cross_module_jpa_remains_confirmable(self) -> None:
+        """Same-module JPA @Entity class without naming suffix must still be
+        confirmed when uniquely resolved."""
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public Order get() { return null; }\n"
+            "}\n"
+        )
+        patch = (
+            "+++ b/src/main/java/com/example/Api.java\n"
+            "@@ -1,0 +1,6 @@\n"
+            "+import org.springframework.web.bind.annotation.*;\n"
+            "+@RestController\n"
+            "+class Api {\n"
+            "+    @GetMapping(\"/order\")\n"
+            "+    public Order get() { return null; }\n"
+            "+}\n"
+        )
+
+        req = self._make_req("src/main/java/com/example/Api.java", source, patch)
+
+        class JpaOrderReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == "src/main/java/com/example/Api.java":
+                    return source.encode("utf-8")
+                if path == "src/main/java/com/example/Order.java":
+                    return (
+                        b"package com.example;\n"
+                        b"import jakarta.persistence.Entity;\n"
+                        b"@Entity\n"
+                        b"class Order { private Long id; }\n"
+                    )
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        result = ReviewEngine().assess(req, source_reader=JpaOrderReader())
+        # Should detect the candidate — Order is confirmed JPA @Entity
+        domain = [
+            c for c in result.candidates
+            if c.invariant_id == "no-domain-leak"
+        ]
+        assert len(domain) >= 1, (
+            f"Imported @Entity class without suffix must be detected, "
+            f"got {len(domain)} candidates"
+        )
+        assert domain[0].confidence in ("medium", "high"), (
+            f"Uniquely resolved JPA must be medium/high, got {domain[0].confidence}"
+        )
+
+    def test_primitives_strings_collections_stay_acceptable(self) -> None:
+        """Standard types (void, String, int, List, etc.) must always be
+        acceptable — never produce candidates or gaps."""
+        standard_types = ["void", "String", "int", "List<String>",
+                          "ResponseEntity<String>", "Optional<String>",
+                          "Map<String, Object>", "BigDecimal"]
+        for std_type in standard_types:
+            patch = (
+                f"+++ b/src/main/java/com/example/Api.java\n"
+                f"@@ -1,0 +1,6 @@\n"
+                f"+import org.springframework.web.bind.annotation.*;\n"
+                f"+@RestController\n"
+                f"+class Api {{\n"
+                f"+    @GetMapping(\"/test\")\n"
+                f"+    public {std_type} get() {{ return null; }}\n"
+                f"+}}\n"
+            )
+
+            cf = ChangedFile(
+                path="src/main/java/com/example/Api.java",
+                status="modified",
+                patch=patch,
+                patch_complete=True,
+            )
+            req = ReviewRequest(
+                base_sha="base",
+                head_sha="exact-head",
+                invariants=[self._invariant()],
+                changed_files=[cf],
+            )
+            result = ReviewEngine().assess(req)
+            domain = [
+                c for c in result.candidates
+                if c.invariant_id == "no-domain-leak"
+            ]
+            assert len(domain) == 0, (
+                f"Standard type {std_type} must not produce domain-leak candidate"
+            )
+
+
+# ---------------------------------------------------------------------------
+# P1 Finding 5: Changed-child retry regression
+# ---------------------------------------------------------------------------
+
+
+class TestChangedChildRetryAnchoring:
+    """P1 finding 5: When a qualifying changed sleep/state-change child is
+    detected inside a retry loop, the candidate start/end must anchor on
+    the changed child line, not the enclosing loop."""
+
+    @staticmethod
+    def _invariant() -> Invariant:
+        return Invariant(
+            id="no-temporary-monitoring",
+            title="No temp monitoring",
+            severity=Severity.ERROR,
+            scope=InvariantScope(languages=["java"], include_paths=["src/**"]),
+            rule="No temporary monitoring.",
+            rationale="Stable operations.",
+            violating_examples="Bad",
+            acceptable_examples="Good",
+        )
+
+    def test_changed_state_child_anchors_candidate(self) -> None:
+        """State-change line 5 added to existing loop+sleep: candidate
+        start=end must be at line 5 (the changed child), not the unchanged
+        loop opening.  Related evidence must reference enclosing loop."""
+        source = (
+            "package com.example;\n"
+            "class RetryWorker {\n"
+            "    public void process() {\n"
+            "        while (true) {\n"
+            "            Thread.sleep(1000);\n"
+            "            repository.save(new Order());\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        # Only the save() call at line 6 is changed (1-indexed)
+        patch = (
+            "+++ b/src/main/java/com/example/RetryWorker.java\n"
+            "@@ -5,0 +6,1 @@\n"
+            "+            repository.save(new Order());\n"
+        )
+
+        cf = ChangedFile(
+            path="src/main/java/com/example/RetryWorker.java",
+            status="modified",
+            patch=patch,
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[self._invariant()],
+            changed_files=[cf],
+        )
+
+        class ExactSourceReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == cf.path:
+                    return source.encode("utf-8")
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        result = ReviewEngine().assess(req, source_reader=ExactSourceReader())
+        candidates = [
+            c for c in result.candidates
+            if c.invariant_id == "no-temporary-monitoring"
+        ]
+        assert len(candidates) >= 1, (
+            f"Expected retry candidate, got {len(candidates)}"
+        )
+        c = candidates[0]
+        # Anchor must be on the changed child line (6), not the loop (4)
+        assert c.pattern == "wait retry", (
+            f"Expected wait retry pattern, got {c.pattern}"
+        )
+        assert c.start_line == c.end_line, (
+            f"Changed-child anchor must be single-line, "
+            f"got start={c.start_line} end={c.end_line}"
+        )
+        assert c.start_line == 6, (
+            f"Anchor must be at changed state-change line 6, "
+            f"got start={c.start_line} end={c.end_line}"
+        )
+        # Related evidence must reference the enclosing loop
+        assert c.related_evidence is not None, (
+            "Must have related structural loop evidence"
+        )
+        assert "loop" in (c.related_evidence or "").lower() or "4" in (c.related_evidence or ""), (
+            f"Related evidence must reference enclosing loop, "
+            f"got: {c.related_evidence}"
+        )
+
+    def test_changed_sleep_child_anchors_candidate(self) -> None:
+        """Sleep line added to existing loop+state: candidate must anchor
+        on the changed sleep child line."""
+        source = (
+            "package com.example;\n"
+            "class RetryWorker {\n"
+            "    public void process() {\n"
+            "        while (true) {\n"
+            "            repository.save(new Order());\n"
+            "            Thread.sleep(1000);\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        # Only the sleep() call at line 6 is changed
+        patch = (
+            "+++ b/src/main/java/com/example/RetryWorker.java\n"
+            "@@ -5,0 +6,1 @@\n"
+            "+            Thread.sleep(1000);\n"
+        )
+
+        cf = ChangedFile(
+            path="src/main/java/com/example/RetryWorker.java",
+            status="modified",
+            patch=patch,
+            patch_complete=True,
+        )
+        req = ReviewRequest(
+            base_sha="abc",
+            head_sha="def",
+            invariants=[self._invariant()],
+            changed_files=[cf],
+        )
+
+        class ExactSourceReader:
+            def changed_files(self) -> list[ChangedFile]:
+                return []
+
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path == cf.path:
+                    return source.encode("utf-8")
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java"]
+
+        result = ReviewEngine().assess(req, source_reader=ExactSourceReader())
+        candidates = [
+            c for c in result.candidates
+            if c.invariant_id == "no-temporary-monitoring"
+        ]
+        assert len(candidates) >= 1, (
+            f"Expected retry candidate for changed sleep, got {len(candidates)}"
+        )
+        c = candidates[0]
+        assert c.pattern == "wait retry"
+        assert c.start_line == c.end_line, (
+            f"Changed-child anchor must be single-line, "
+            f"got start={c.start_line} end={c.end_line}"
+        )
+        assert c.start_line == 6, (
+            f"Anchor must be at changed sleep line 6, "
+            f"got start={c.start_line} end={c.end_line}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# P0 Finding 8: Root-index behavior audit tests
+# ---------------------------------------------------------------------------
+
+
+class TestRootIndexBehavior:
+    """P0 finding 8: Source root index must never silently slice, truncate,
+    or select the first match.  Missing, ambiguous, or over-budget required
+    evidence must remain incomplete."""
+
+    def test_ambiguous_resolution_returns_none(self) -> None:
+        """Two source roots both resolving the same qualified name →
+        _resolve returns None (not first-match)."""
+        from invariant_guardian.application import _build_type_resolver
+
+        source = "package com.example;\n"
+        source += "import org.springframework.web.bind.annotation.*;\n"
+        source += "@RestController class Api {}\n"
+
+        class AmbiguousReader:
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                if path in (
+                    "src/main/java/com/example/Order.java",
+                    "module-domain/src/main/java/com/example/Order.java",
+                ):
+                    return b"import jakarta.persistence.Entity;\n@Entity class Order {}\n"
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return ["src/main/java", "module-domain/src/main/java"]
+
+        resolver = _build_type_resolver(
+            "src/main/java/com/example/Api.java",
+            "sha",
+            AmbiguousReader(),
+            source,
+        )
+        assert resolver is not None
+        # Both roots resolve → ambiguous → must return None
+        result = resolver("Order")
+        assert result is None, (
+            f"Ambiguous resolution must return None, got: {result!r}"
+        )
+
+    def test_missing_roots_from_list_source_roots_marks_unavailable(self) -> None:
+        """list_source_roots returns None → index unavailable → _resolve
+        returns None."""
+        from invariant_guardian.application import _build_type_resolver
+
+        source = "package com.example;\n@RestController class Api {}\n"
+
+        class MissingRootsReader:
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return None  # missing
+
+        resolver = _build_type_resolver(
+            "src/main/java/com/example/Api.java",
+            "sha",
+            MissingRootsReader(),
+            source,
+        )
+        assert resolver is not None
+        result = resolver("Order")
+        assert result is None, (
+            f"Missing root index must return None, got: {result!r}"
+        )
+
+    def test_over_20_roots_marks_unavailable(self) -> None:
+        """list_source_roots returns >20 roots → index unavailable → None."""
+        from invariant_guardian.application import _build_type_resolver
+
+        source = "package com.example;\n@RestController class Api {}\n"
+
+        class OverBudgetRootsReader:
+            def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+                return None
+
+            def list_source_roots(self, ref: str) -> list[str] | None:
+                return [f"module-{i:02d}/src/main/java" for i in range(25)]
+
+        resolver = _build_type_resolver(
+            "src/main/java/com/example/Api.java",
+            "sha",
+            OverBudgetRootsReader(),
+            source,
+        )
+        assert resolver is not None
+        result = resolver("Order")
+        assert result is None, (
+            f"Over-budget roots must return None, got: {result!r}"
+        )

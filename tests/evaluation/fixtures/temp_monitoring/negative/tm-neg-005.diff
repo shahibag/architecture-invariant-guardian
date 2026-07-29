@@ -1,0 +1,8 @@
+--- a/src/main/java/com/example/DataService.java
++++ b/src/main/java/com/example/DataService.java
+@@ -1,5 +1,5 @@
+ class DataService {
+     void saveData(Data d) {
++        repository.save(d);
+     }
+ }

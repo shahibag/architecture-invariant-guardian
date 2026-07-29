@@ -58,12 +58,105 @@ class GitHubClient:
         self._repository = repository
         self._pull_number = pull_number
         self._base = f"https://api.github.com/repos/{repository}"
+        self._source_roots_cache: dict[str, list[str] | None] = {}
 
     def pull_diff(self) -> str:
         return self._request(
             f"{self._base}/pulls/{self._pull_number}",
             accept="application/vnd.github.v3.diff",
         ).decode("utf-8")
+
+    def list_source_roots(self, ref: str) -> list[str] | None:
+        """Return known Java source-root directories at *ref* (exact SHA).
+
+        Uses the Git Trees API to discover directories that contain
+        ``.java`` files.  Entries and response bytes are bounded —
+        truncated results return a partial list, never a fabricated one.
+
+        Returns ``None`` when the API is unavailable or returns
+        non-directory entries.  This is a saved-fake-responses-only
+        implementation for P1 finding 3 (cross-module imports).
+        """
+        if ref in self._source_roots_cache:
+            return self._source_roots_cache[ref]
+
+        try:
+            tree = self._json(
+                f"{self._base}/git/trees/{ref}?recursive=1",
+            )
+        except RuntimeError:
+            self._source_roots_cache[ref] = None
+            return None
+
+        if not isinstance(tree, dict):
+            self._source_roots_cache[ref] = None
+            return None
+        if tree.get("truncated") is True:
+            self._source_roots_cache[ref] = None
+            return None
+        entries = tree.get("tree")
+        if not isinstance(entries, list):
+            self._source_roots_cache[ref] = None
+            return None
+
+        # Collect directories containing .java files (bounded)
+        roots: set[str] = set()
+        max_entries = 500  # hard cap — never unbounded
+        if len(entries) > max_entries:
+            self._source_roots_cache[ref] = None
+            return None
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") != "blob":
+                continue
+            path = entry.get("path", "")
+            if not isinstance(path, str) or not path.endswith(".java"):
+                continue
+            # Derive source root from the path
+            parts = path.split("/")
+            for index in range(max(0, len(parts) - 2)):
+                segment = parts[index : index + 3]
+                if segment in (["src", "main", "java"], ["src", "test", "java"]):
+                    roots.add("/".join(parts[: index + 3]))
+                    break
+            else:
+                # Use the parent directory as a potential root
+                if len(parts) > 1:
+                    roots.add("/".join(parts[:-1]))
+        if len(roots) > 20:
+            self._source_roots_cache[ref] = None
+            return None
+        result = sorted(roots) if roots else None
+        self._source_roots_cache[ref] = result
+        return result
+
+    def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+        """Fetch the raw content of *path* at *ref* (exact SHA/ref).
+
+        Uses the GitHub Contents API.  Returns ``None`` when the file is
+        missing, is a directory, or exceeds a reasonable size threshold.
+        The caller must still apply ``read_source_safely`` for binary
+        rejection and strict UTF-8 decoding.
+        """
+        # Validate path — must be repository-relative, no traversal
+        if not path or "\x00" in path or path.startswith("/"):
+            return None
+        if ".." in path.split("/"):
+            return None
+
+        try:
+            raw = self._request(
+                f"{self._base}/contents/{path}?ref={ref}",
+                accept="application/vnd.github.raw",
+            )
+        except RuntimeError:
+            # GitHub returns 404 for missing files, 403 for large/binary
+            return None
+
+        if raw is None or len(raw) == 0:
+            return None
+        return raw
 
     def changed_files(self) -> list[ChangedFile]:
         """Fetch the PR file listing from the GitHub REST API, paginating

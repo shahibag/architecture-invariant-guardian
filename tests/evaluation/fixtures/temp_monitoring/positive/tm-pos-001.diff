@@ -1,0 +1,10 @@
+--- a/src/main/java/com/example/OrderService.java
++++ b/src/main/java/com/example/OrderService.java
+@@ -1,7 +1,7 @@
+ import org.springframework.scheduling.annotation.Scheduled;
+ class OrderService {
++    @Scheduled(fixedDelay = 5000)
++    public void retryOrders() {
+         orderRepository.save(order);
+     }
+ }

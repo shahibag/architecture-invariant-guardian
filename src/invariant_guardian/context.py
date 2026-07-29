@@ -24,6 +24,63 @@ MAX_SOURCE_BYTES_PER_FILE = 100_000
 MAX_MODEL_CONTEXT_CHARS = 60_000
 CONTEXT_LINES = 40
 
+# Binary content detection — files containing null bytes or with high
+# ratios of non-printable characters are rejected
+_BINARY_THRESHOLD = 0.10  # reject when >10% of initial bytes are non-printable
+
+
+# ---------------------------------------------------------------------------
+# Safe source-file reading
+# ---------------------------------------------------------------------------
+
+
+def read_source_safely(
+    raw_content: bytes | None,
+    path: str,
+    byte_cap: int = MAX_SOURCE_BYTES_PER_FILE,
+) -> str | None:
+    """Safely decode source content for structural analysis.
+
+    Enforces:
+    - *raw_content* must not be ``None`` (missing/unavailable)
+    - Pre-decode byte cap at *byte_cap* — oversized content is REJECTED
+    - Binary rejection (null bytes, high non-printable ratio)
+    - Strict UTF-8 — invalid bytes are NEVER replaced with U+FFFD
+
+    Returns decoded ``str``, or ``None`` when the content is missing,
+    oversized, binary, or invalid UTF-8.  ``None`` here means the file
+    is unavailable for structural analysis and must be recorded as a
+    coverage gap.
+    """
+    if raw_content is None:
+        return None
+
+    # Pre-decode byte cap — oversized content is rejected, not truncated.
+    # Truncation hides whether critical type information is present.
+    if len(raw_content) > byte_cap:
+        return None
+
+    # Binary rejection: check for null bytes
+    if b"\x00" in raw_content:
+        return None
+
+    # Binary rejection: check non-printable ratio in first 4 KiB
+    sample = raw_content[:4096]
+    if len(sample) > 0:
+        non_printable = sum(
+            1 for b in sample if b < 0x20 and b not in (0x09, 0x0A, 0x0D)
+        )
+        if non_printable / len(sample) > _BINARY_THRESHOLD:
+            return None
+
+    # Strict UTF-8 — never replace invalid bytes
+    try:
+        text = raw_content.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+    return text
+
 
 # ---------------------------------------------------------------------------
 # Path normalisation

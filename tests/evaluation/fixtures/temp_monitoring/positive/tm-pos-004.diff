@@ -1,0 +1,11 @@
+--- a/src/main/java/com/example/OrderPoller.java
++++ b/src/main/java/com/example/OrderPoller.java
+@@ -1,8 +1,8 @@
+ class OrderPoller {
+     void poll() {
++        while (true) {
+             checkStatus();
+             orderRepository.update(order);
+         }
+     }
+ }

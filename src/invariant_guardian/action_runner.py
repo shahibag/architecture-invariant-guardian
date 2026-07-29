@@ -109,7 +109,7 @@ def run() -> int:
                 ),
             )
 
-        assessment = engine.assess(request, judge=judge)
+        assessment = engine.assess(request, judge=judge, source_reader=client)
 
         # --- merge load-time warnings ---------------------------------------
         assessment.warnings.extend(

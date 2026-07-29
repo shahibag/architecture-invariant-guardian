@@ -1,0 +1,11 @@
+--- a/src/main/java/com/example/CronMonitor.java
++++ b/src/main/java/com/example/CronMonitor.java
+@@ -1,8 +1,8 @@
+ import org.springframework.scheduling.annotation.Scheduled;
+ class CronMonitor {
++    @Scheduled(cron = "*/30 * * * * *")
++    public void checkAndPersist() {
+         var data = fetchData();
+         repository.persist(data);
+     }
+ }

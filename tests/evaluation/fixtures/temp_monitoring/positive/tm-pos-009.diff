@@ -1,0 +1,11 @@
+--- a/src/main/java/com/example/CacheFlusher.java
++++ b/src/main/java/com/example/CacheFlusher.java
+@@ -1,8 +1,8 @@
+ import java.util.concurrent.*;
+ class CacheFlusher {
+     void init() {
+         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
++        scheduler.scheduleWithFixedDelay(
+             () -> cache.flush(), 1, 5, TimeUnit.MINUTES);
+     }
+ }

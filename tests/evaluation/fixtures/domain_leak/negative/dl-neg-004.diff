@@ -1,0 +1,7 @@
+--- a/src/main/java/com/example/OrderController.java
++++ b/src/main/java/com/example/OrderController.java
+@@ -3,4 +3,4 @@
+ class OrderController {
+     @GetMapping("/orders")
++    public String getOrder() { return "ok"; }
+ }

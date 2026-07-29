@@ -1,0 +1,971 @@
+manifest_version: 2
+evaluated_java_version: '21'
+java_features_tested:
+- annotations
+- generics
+- records
+- nested_classes
+- multiline_method_declaration
+- lambdas
+- switch_expressions
+- text_blocks
+- record_pattern
+parser:
+  tree_sitter: 0.26.0
+  tree_sitter_java: 0.23.5
+cases:
+  dl-pos-001:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-001.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-001.diff
+    status: modified
+    changed_lines:
+    - 8
+    java_target: '17'
+    evidence_location: 8
+    rationale: RestController returns @Entity-annotated class
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  dl-pos-002:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-002.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-002.diff
+    status: modified
+    changed_lines:
+    - 9
+    java_target: '17'
+    evidence_location: 9
+    rationale: Controller returns List of @Entity type
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  dl-pos-003:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-003.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-003.diff
+    status: modified
+    changed_lines:
+    - 8
+    java_target: '17'
+    evidence_location: 8
+    rationale: Controller accepts @Entity type as @RequestBody
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  dl-pos-004:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/ApiController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-004.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-004.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: 5
+    rationale: '@RequestMapping controller returns Entity-named type'
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/ItemEntity.java: fixtures/domain_leak/positive/dl-pos-004_decl_ItemEntity.java
+    live_judgment_required: true
+  dl-pos-005:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/UserController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-005.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-005.diff
+    status: modified
+    changed_lines:
+    - 8
+    java_target: '17'
+    evidence_location: 8
+    rationale: Controller returns @MappedSuperclass type
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  dl-pos-006:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/LegacyController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-006.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-006.diff
+    status: modified
+    changed_lines:
+    - 10
+    java_target: '17'
+    evidence_location: 10
+    rationale: '@Controller with @ResponseBody returns persistence type'
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  dl-pos-007:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/ComplexController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-007.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-007.diff
+    status: modified
+    changed_lines:
+    - 9
+    java_target: '17'
+    evidence_location: 9
+    rationale: Multiline method signature returns entity type
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  dl-pos-008:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/NestedController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-008.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-008.diff
+    status: modified
+    changed_lines:
+    - 9
+    java_target: '17'
+    evidence_location: 9
+    rationale: Nested controller class leaks entity
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  dl-pos-009:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/AddressController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-009.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-009.diff
+    status: modified
+    changed_lines:
+    - 8
+    java_target: '17'
+    evidence_location: 8
+    rationale: '@Embeddable type exposed in controller'
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  dl-pos-010:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/ProductController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-010.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-010.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: 5
+    rationale: Naming convention Entity without annotation still detected
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/ProductEntity.java: fixtures/domain_leak/positive/dl-pos-010_decl_ProductEntity.java
+    live_judgment_required: true
+  dl-pos-011:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/CartController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-011.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-011.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: 5
+    rationale: Aggregate suffix naming convention exposed
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/ShoppingCartAggregate.java: fixtures/domain_leak/positive/dl-pos-011_decl_ShoppingCartAggregate.java
+    live_judgment_required: true
+  dl-pos-012:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/ConfigController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-012.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-012.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: 5
+    rationale: PersistenceModel naming convention exposed in @PutMapping
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/ConfigPersistenceModel.java: fixtures/domain_leak/positive/dl-pos-012_decl_ConfigPersistenceModel.java
+    live_judgment_required: true
+  dl-neg-001:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-001.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-001.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: DTO return type — safe
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/OrderResponse.java: fixtures/domain_leak/negative/dl-neg-001_decl_OrderResponse.java
+    live_judgment_required: false
+  dl-neg-002:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-002.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-002.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: Java record used as response — safe
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  dl-neg-003:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/OrderService.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-003.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-003.diff
+    status: modified
+    changed_lines:
+    - 2
+    java_target: '17'
+    evidence_location: null
+    rationale: Non-controller public method — not a leak
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  dl-neg-004:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-004.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-004.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: No matching internal type — clean
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  dl-neg-005:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-005.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-005.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: Naming convention DTO — not Entity/Aggregate/PersistenceModel
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/OrderDTO.java: fixtures/domain_leak/negative/dl-neg-005_decl_OrderDTO.java
+    live_judgment_required: false
+  dl-neg-006:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-006.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-006.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: DTO with Data suffix — safe, not Entity/Aggregate/PersistenceModel
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/OrderData.java: fixtures/domain_leak/negative/dl-neg-006_decl_OrderData.java
+    live_judgment_required: false
+  dl-neg-007:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/EventController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-007.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-007.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: Public event class used in controller — explicitly public contract
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/OrderCreatedEvent.java: fixtures/domain_leak/negative/dl-neg-007_decl_OrderCreatedEvent.java
+    live_judgment_required: false
+  dl-neg-008:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-008.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-008.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: Interface return type — not a concrete entity
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/OrderService.java: fixtures/domain_leak/negative/dl-neg-008_decl_OrderService.java
+    live_judgment_required: false
+  dl-neg-009:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/OrderController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-009.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-009.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: Void return — no leak
+    source_roots:
+    - src/main/java
+    related_sources:
+      src/main/java/com/example/CreateRequest.java: fixtures/domain_leak/negative/dl-neg-009_decl_CreateRequest.java
+    live_judgment_required: false
+  dl-neg-010:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/CounterController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-010.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-010.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: Primitive return type — no leak
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  dl-neg-011:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/SafeController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-011.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-011.diff
+    status: modified
+    changed_lines:
+    - 7
+    java_target: '17'
+    evidence_location: null
+    rationale: Prompt injection in string literal — must not alter detection
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  dl-neg-012:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/CommentController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-012.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-012.diff
+    status: modified
+    changed_lines:
+    - 8
+    java_target: '17'
+    evidence_location: null
+    rationale: Comment containing injection text — must not affect detection
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-pos-001:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/OrderService.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-001.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-001.diff
+    status: modified
+    changed_lines:
+    - 3
+    - 4
+    java_target: '17'
+    evidence_location: 3
+    rationale: '@Scheduled method with state change'
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-002:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/OrderService.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-002.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-002.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: 5
+    rationale: ScheduledExecutorService.schedule call
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-003:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/PollingService.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-003.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-003.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: 5
+    rationale: scheduleAtFixedRate with state change
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-004:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/OrderPoller.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-004.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-004.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: 3
+    rationale: while(true) polling with state change
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-005:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/InfinitePoller.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-005.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-005.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: 3
+    rationale: for(;;) infinite polling with state transition
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-006:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/RetryService.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-006.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-006.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: 3
+    rationale: Retry loop with Thread.sleep and state change
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-007:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/BackoffRetry.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-007.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-007.diff
+    status: modified
+    changed_lines:
+    - 4
+    java_target: '17'
+    evidence_location: 4
+    rationale: Retry loop with TimeUnit sleep and state change
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-008:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/CronMonitor.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-008.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-008.diff
+    status: modified
+    changed_lines:
+    - 3
+    - 4
+    java_target: '17'
+    evidence_location: 3
+    rationale: '@Scheduled with cron expression and persist'
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-009:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/CacheFlusher.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-009.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-009.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: 5
+    rationale: scheduleWithFixedDelay with state flush
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-010:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/StatusRetry.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-010.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-010.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: 3
+    rationale: Thread.sleep with setStatus state change
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-011:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/EventMonitor.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-011.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-011.diff
+    status: modified
+    changed_lines:
+    - 3
+    - 7
+    java_target: '17'
+    evidence_location: 3
+    rationale: Multiline @Scheduled with fixedRate and emit
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-pos-012:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/OuterService.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-012.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-012.diff
+    status: modified
+    changed_lines:
+    - 4
+    - 7
+    java_target: '17'
+    evidence_location: 4
+    rationale: Nested class with @Scheduled and state change
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  tm-neg-001:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/DailyReconciliation.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-001.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-001.diff
+    status: modified
+    changed_lines:
+    - 4
+    java_target: '17'
+    evidence_location: null
+    rationale: Documented daily reconciliation job — intentional
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-002:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/ResilientClient.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-002.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-002.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: null
+    rationale: Bounded retry with exponential backoff — resilience pattern
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-003:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/BatchProcessor.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-003.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-003.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: null
+    rationale: Bounded for loop — not infinite polling
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-004:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/NotAScheduler.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-004.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-004.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: null
+    rationale: Scheduled annotation on a class without a method — no detection
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-005:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/DataService.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-005.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-005.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: null
+    rationale: State change without monitoring — not a candidate
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-006:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/Waiter.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-006.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-006.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: null
+    rationale: Sleep without state change or loop — not a retry pattern
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-007:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/kotlin/Check.kt
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-007.kt
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-007.diff
+    status: modified
+    changed_lines:
+    - 1
+    java_target: '17'
+    evidence_location: null
+    rationale: Non-Java file — not evaluated
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-008:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/CleanService.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-008.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-008.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: Prompt injection in comment — @Scheduled in a comment
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-009:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/SafeCode.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-009.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-009.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: null
+    rationale: Prompt injection in string — 'while(true)' in string literal
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-010:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/AsyncWorker.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-010.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-010.diff
+    status: modified
+    changed_lines:
+    - 4
+    java_target: '17'
+    evidence_location: null
+    rationale: ExecutorService submit (not schedule) — not scheduling
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-011:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/OldScheduler.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-011.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-011.diff
+    status: modified
+    changed_lines: []
+    java_target: '17'
+    evidence_location: null
+    rationale: Unchanged file — no changed lines match method range
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  tm-neg-012:
+    invariant: no-temporary-monitoring
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/TextBlockUser.java
+    source_fixture: fixtures/temp_monitoring/negative/tm-neg-012.java
+    patch_fixture: fixtures/temp_monitoring/negative/tm-neg-012.diff
+    status: modified
+    changed_lines:
+    - 3
+    java_target: '17'
+    evidence_location: null
+    rationale: Text block containing code — must not be parsed as code
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  dl-pos-013:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: confirm
+    repository_path: src/main/java/com/example/PaymentApiController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-013.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-013.diff
+    status: renamed
+    changed_lines:
+    - 8
+    java_target: '17'
+    evidence_location: 8
+    rationale: Renamed controller file — entity leak must still be detected
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+  dl-neg-013:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/LargeController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-013.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-013.diff
+    status: modified
+    changed_lines:
+    - 5
+    java_target: '17'
+    evidence_location: null
+    rationale: Large patch with clean DTO — coverage handled by engine
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  dl-neg-014:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/RecordPatternController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-014.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-014.diff
+    status: modified
+    changed_lines:
+    - 7
+    java_target: '21'
+    evidence_location: null
+    rationale: Java 21 record pattern in instanceof — safe DTO, must parse cleanly
+      and not produce false candidates
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+  dl-pos-014:
+    invariant: no-domain-leak
+    expected_candidate: true
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/ReportController.java
+    source_fixture: fixtures/domain_leak/positive/dl-pos-014.java
+    patch_fixture: fixtures/domain_leak/positive/dl-pos-014.diff
+    status: modified
+    changed_lines:
+    - 14
+    java_target: '17'
+    evidence_location: 14
+    rationale: Candidate-positive case that the deterministic judge rejects — exercises
+      the reject path on a real structural candidate
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+    expected_status: no_confirmed_violations
+  tm-pos-013:
+    invariant: no-temporary-monitoring
+    expected_candidate: true
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/DataPoller.java
+    source_fixture: fixtures/temp_monitoring/positive/tm-pos-013.java
+    patch_fixture: fixtures/temp_monitoring/positive/tm-pos-013.diff
+    status: modified
+    changed_lines:
+    - 6
+    - 7
+    - 8
+    - 9
+    - 10
+    - 11
+    - 12
+    java_target: '17'
+    evidence_location: 8
+    rationale: Candidate-positive @Scheduled case that the deterministic judge rejects
+      — exercises monitoring reject path
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: true
+    expected_status: no_confirmed_violations
+  dl-neg-015:
+    invariant: no-domain-leak
+    expected_candidate: false
+    expected_final_decision: reject
+    repository_path: src/main/java/com/example/HugeController.java
+    source_fixture: fixtures/domain_leak/negative/dl-neg-015.java
+    patch_fixture: fixtures/domain_leak/negative/dl-neg-015.diff
+    status: modified
+    changed_lines:
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    java_target: '17'
+    evidence_location: null
+    rationale: Over-production-limit patch (>200KB) and source (>100KB) — must produce
+      assessment_incomplete, never a clean result
+    source_roots:
+    - src/main/java
+    related_sources: {}
+    live_judgment_required: false
+    expected_status: assessment_incomplete
+thresholds:
+  precision_min: 0.9
+  recall_min: 0.8
+  evidence_validation_pct: 100
+  unsupported_decision_accepted: 0

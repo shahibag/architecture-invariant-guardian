@@ -18,7 +18,8 @@ def test_flags_temporary_monitoring_candidate_with_state_change() -> None:
 
     assert assessment.status == AssessmentStatus.CANDIDATES_REQUIRE_JUDGMENT
     assert assessment.candidates[0].invariant_id == "no-temporary-monitoring"
-    assert assessment.candidates[0].start_line == 10
+    # @Scheduled annotation is on new-file line 5 (hunk starts at +2, +3 lines of context=5)
+    assert assessment.candidates[0].start_line == 5
 
 
 def test_flags_public_entity_return_type() -> None:
