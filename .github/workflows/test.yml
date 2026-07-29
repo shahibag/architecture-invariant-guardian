@@ -97,6 +97,9 @@ jobs:
   action-contract:
     # Real uses: ./ path — only meaningful on pull_request events where the
     # Actions runner injects the PR payload and INPUT_* metadata.
+    # This job must load supported invariants from the PR base SHA and complete
+    # a clean assessment for non-Java PR changes. assessment_incomplete is a
+    # failure here (it previously masked Contents API Base64 decode bugs).
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -111,7 +114,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           invariant-path: tests/fixtures/invariants
-      - name: Verify declared Action outputs
+      - name: Verify complete Action assessment
         run: |
           status='${{ steps.guardian.outputs.assessment-status }}'
           confirmed='${{ steps.guardian.outputs.confirmed-count }}'
@@ -121,14 +124,10 @@ jobs:
           echo "confirmed-count=$confirmed"
           echo "candidate-count=$candidates"
           echo "coverage-complete=$coverage"
-          case "$status" in
-            no_confirmed_violations|confirmed_violations|assessment_incomplete) ;;
-            *) echo "unexpected assessment-status: $status" >&2; exit 1 ;;
-          esac
-          [[ "$confirmed" =~ ^[0-9]+$ ]] || { echo "bad confirmed-count" >&2; exit 1; }
-          [[ "$candidates" =~ ^[0-9]+$ ]] || { echo "bad candidate-count" >&2; exit 1; }
-          case "$coverage" in
-            true|false) ;;
-            *) echo "bad coverage-complete: $coverage" >&2; exit 1 ;;
-          esac
-          echo "PASS: uses: ./ Action outputs verified"
+          # PR #4 changes are non-Java. With both supported invariants loaded
+          # from the base SHA, the only acceptable complete result is clean.
+          test "$status" = "no_confirmed_violations"
+          test "$confirmed" = "0"
+          test "$candidates" = "0"
+          test "$coverage" = "true"
+          echo "PASS: uses: ./ loaded invariants and completed clean assessment"

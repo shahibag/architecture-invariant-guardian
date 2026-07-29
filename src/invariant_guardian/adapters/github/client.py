@@ -449,6 +449,11 @@ class GitHubClient:
                 raise RuntimeError(  # noqa: TRY004 — sanitised, never TypeError
                     "Invariant content response is malformed"
                 )
+            encoding = contents.get("encoding")
+            if encoding != "base64":
+                raise RuntimeError(
+                    "Invariant file content has unsupported encoding"
+                )
             encoded = contents.get("content", "")
             if not isinstance(encoded, str):
                 raise RuntimeError(  # noqa: TRY004 — sanitised, never TypeError
@@ -463,8 +468,15 @@ class GitHubClient:
                 raise RuntimeError(
                     "Invariant file content is empty"
                 )
+            # GitHub Contents API wraps base64 with LF/CRLF only. Normalize
+            # that wrapping, then strict-validate. Reject spaces/tabs/other.
+            normalized = encoded.replace("\r\n", "\n").replace("\n", "")
+            if any(ch.isspace() for ch in normalized):
+                raise RuntimeError(
+                    "Invariant file content could not be decoded"
+                )
             try:
-                ascii_encoded = encoded.encode("ascii")
+                ascii_encoded = normalized.encode("ascii")
             except UnicodeEncodeError:
                 raise RuntimeError(
                     "Invariant file content contains non-ASCII characters"

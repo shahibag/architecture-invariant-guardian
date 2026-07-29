@@ -1033,7 +1033,7 @@ class TestWriteInvariantsValidation:
                 }]
             else:
                 # Content response with invalid base64
-                return {"content": "%%%YQ=="}
+                return {"encoding": "base64", "content": "%%%YQ=="}
 
         client._json = fake_json  # type: ignore[method-assign]
         from pathlib import Path
@@ -1057,7 +1057,7 @@ class TestWriteInvariantsValidation:
                 }]
             else:
                 # Content is not a string — already caught by existing check
-                return {"content": 12345}
+                return {"encoding": "base64", "content": 12345}
 
         client._json = fake_json  # type: ignore[method-assign]
         from pathlib import Path
@@ -1136,6 +1136,7 @@ class TestWriteInvariantsValidation:
                 ]
             else:
                 return {
+                    "encoding": "base64",
                     "content": "IyBUZXN0IEludmFyaWFudAo=",  # valid base64: "# Test Invariant\n"
                 }
 
@@ -1165,7 +1166,7 @@ class TestWriteInvariantsValidation:
                     "url": "https://api.github.com/repos/owner/repo/contents/a.md",
                 }]
             else:
-                return {"content": ""}  # empty base64
+                return {"encoding": "base64", "content": ""}  # empty base64
 
         client._json = fake_json  # type: ignore[method-assign]
         from pathlib import Path
@@ -1189,7 +1190,7 @@ class TestWriteInvariantsValidation:
                 }]
             else:
                 # Contains non-ASCII UTF-8 characters
-                return {"content": "¡Hola Mundo!"}
+                return {"encoding": "base64", "content": "¡Hola Mundo!"}
 
         client._json = fake_json  # type: ignore[method-assign]
         from pathlib import Path
@@ -1215,7 +1216,7 @@ class TestWriteInvariantsValidation:
             else:
                 # Valid base64 for 0xFF 0xFE 0x00 0x01 (invalid UTF-8)
                 import base64 as _b64
-                return {"content": _b64.b64encode(b'\xff\xfe\x00\x01').decode("ascii")}
+                return {"encoding": "base64", "content": _b64.b64encode(b'\xff\xfe\x00\x01').decode("ascii")}
 
         client._json = fake_json  # type: ignore[method-assign]
         from pathlib import Path
@@ -3299,3 +3300,254 @@ class TestGitHubActionsTokenOwnership:
 
         assert any(c[0] == "PATCH" and "/43" in c[1] for c in call_log)
         assert not any(c[0] == "PATCH" and "/42" in c[1] for c in call_log)
+
+
+# ---------------------------------------------------------------------------
+# GitHub Contents API Base64 decoding (merge-readiness E2E)
+# ---------------------------------------------------------------------------
+from pathlib import Path as _Path
+
+
+class TestContentsBase64Decoding:
+    """GitHub Contents API wraps base64 with newlines. Decode must accept
+    only that wrapping while remaining fail-closed for other corruption.
+    """
+
+    def _listing(self, name: str = "no-domain-leak.md") -> list[dict]:
+        return [
+            {
+                "type": "file",
+                "name": name,
+                "url": f"https://api.github.com/repos/owner/repo/contents/{name}",
+            }
+        ]
+
+    def _run_write(self, content_payload: dict, tmp_path: _Path) -> _Path:
+        client = GitHubClient("token", "owner/repo", 1)
+        dest = tmp_path / "inv"
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            # Directory listing vs file content
+            if ("/contents/invariants?" in url) or url.rstrip("/").endswith("/contents/invariants"):
+                return self._listing(content_payload.get("_name", "no-domain-leak.md"))
+            return content_payload
+
+        client._json = fake_json  # type: ignore[method-assign]
+        client.write_invariants(dest, "base-sha", "invariants")
+        return dest
+
+    def test_valid_unwrapped_base64(self, tmp_path: _Path) -> None:
+        import base64
+
+        body = b"---\nid: no-domain-leak\ntitle: t\nseverity: error\nscope:\n  languages: [java]\n  include_paths: ['src/**']\n---\n\n## Rule\nr\n\n## Rationale\nr\n\n## Violating examples\nv\n\n## Acceptable examples\na\n"
+        payload = {
+            "encoding": "base64",
+            "content": base64.b64encode(body).decode("ascii"),
+            "name": "no-domain-leak.md",
+            "type": "file",
+        }
+        dest = self._run_write(payload, tmp_path)
+        assert (dest / "no-domain-leak.md").read_bytes() == body
+
+    def test_valid_base64_wrapped_with_lf(self, tmp_path: _Path) -> None:
+        import base64
+
+        body = b"rule body with lf wrap\n"
+        enc = base64.b64encode(body).decode("ascii")
+        wrapped = "\n".join(enc[i : i + 8] for i in range(0, len(enc), 8)) + "\n"
+        payload = {"encoding": "base64", "content": wrapped}
+        dest = self._run_write(payload, tmp_path)
+        assert (dest / "no-domain-leak.md").read_bytes() == body
+
+    def test_valid_base64_wrapped_with_crlf(self, tmp_path: _Path) -> None:
+        import base64
+
+        body = b"rule body with crlf wrap\n"
+        enc = base64.b64encode(body).decode("ascii")
+        wrapped = "\r\n".join(enc[i : i + 8] for i in range(0, len(enc), 8)) + "\r\n"
+        payload = {"encoding": "base64", "content": wrapped}
+        dest = self._run_write(payload, tmp_path)
+        assert (dest / "no-domain-leak.md").read_bytes() == body
+
+    def test_multiple_wrapped_lines(self, tmp_path: _Path) -> None:
+        import base64
+
+        body = b"x" * 200
+        enc = base64.b64encode(body).decode("ascii")
+        wrapped = "\n".join(enc[i : i + 60] for i in range(0, len(enc), 60)) + "\n"
+        assert wrapped.count("\n") >= 3
+        payload = {"encoding": "base64", "content": wrapped}
+        dest = self._run_write(payload, tmp_path)
+        assert (dest / "no-domain-leak.md").read_bytes() == body
+
+    def test_invalid_base64_after_newline_normalization_rejected(
+        self, tmp_path: _Path
+    ) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if url.endswith("invariants?ref=base-sha") or "/contents/invariants?" in url:
+                return self._listing()
+            return {"encoding": "base64", "content": "@@@@\n####\n"}
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="decoded|base64|content"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_embedded_spaces_rejected(self, tmp_path: _Path) -> None:
+        import base64
+
+        enc = base64.b64encode(b"hello").decode("ascii")
+        spaced = enc[:2] + " " + enc[2:]
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if ("/contents/invariants?" in url) or url.rstrip("/").endswith("/contents/invariants"):
+                return self._listing()
+            return {"encoding": "base64", "content": spaced}
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="decoded|base64|content"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_embedded_tabs_rejected(self, tmp_path: _Path) -> None:
+        import base64
+
+        enc = base64.b64encode(b"hello").decode("ascii")
+        tabbed = enc[:2] + "\t" + enc[2:]
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if ("/contents/invariants?" in url) or url.rstrip("/").endswith("/contents/invariants"):
+                return self._listing()
+            return {"encoding": "base64", "content": tabbed}
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="decoded|base64|content"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_unsupported_encoding_rejected(self, tmp_path: _Path) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if ("/contents/invariants?" in url) or url.rstrip("/").endswith("/contents/invariants"):
+                return self._listing()
+            return {"encoding": "utf-8", "content": "aGVsbG8="}
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="encoding"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_missing_encoding_rejected(self, tmp_path: _Path) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if "/contents/invariants" in url and "no-domain-leak.md" not in url:
+                return self._listing()
+            # Explicitly omit encoding while providing otherwise valid content.
+            return {"content": "aGVsbG8="}
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="encoding"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_non_string_encoding_rejected(self, tmp_path: _Path) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if ("/contents/invariants?" in url) or url.rstrip("/").endswith("/contents/invariants"):
+                return self._listing()
+            return {"encoding": 1, "content": "aGVsbG8="}
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="encoding"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_empty_content_rejected(self, tmp_path: _Path) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if ("/contents/invariants?" in url) or url.rstrip("/").endswith("/contents/invariants"):
+                return self._listing()
+            return {"encoding": "base64", "content": ""}
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="empty|content"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_empty_decoded_bytes_rejected(self, tmp_path: _Path) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if ("/contents/invariants?" in url) or url.rstrip("/").endswith("/contents/invariants"):
+                return self._listing()
+            return {"encoding": "base64", "content": ""}  # empty encoded
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="empty|content"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_invalid_utf8_rejected(self, tmp_path: _Path) -> None:
+        import base64
+
+        client = GitHubClient("token", "owner/repo", 1)
+        enc = base64.b64encode(b"\xff\xfe\x00").decode("ascii")
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if ("/contents/invariants?" in url) or url.rstrip("/").endswith("/contents/invariants"):
+                return self._listing()
+            return {"encoding": "base64", "content": enc}
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="UTF-8|utf-8|content"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_oversized_encoded_response_rejected(self, tmp_path: _Path) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+        huge = "A" * 1_000_001
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if ("/contents/invariants?" in url) or url.rstrip("/").endswith("/contents/invariants"):
+                return self._listing()
+            return {"encoding": "base64", "content": huge}
+
+        client._json = fake_json  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="size|limit|content"):
+            client.write_invariants(tmp_path / "inv", "base-sha", "invariants")
+
+    def test_saved_github_contents_response_writes_invariant(
+        self, tmp_path: _Path
+    ) -> None:
+        import json
+        from pathlib import Path as P
+
+        fixture = P(__file__).parent / "fixtures/github/contents_no_domain_leak.json"
+        payload = json.loads(fixture.read_text(encoding="utf-8"))
+        assert payload.get("encoding") == "base64"
+        assert "\n" in payload["content"]
+        # Use a same-repo contents URL so structural URL validation passes.
+        safe_url = (
+            "https://api.github.com/repos/owner/repo/contents/"
+            "tests/fixtures/invariants/no-domain-leak.md"
+        )
+        payload = {**payload, "url": safe_url}
+
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json(url: str, method: str = "GET", payload_arg=None) -> object:
+            if "/contents/invariants" in url and "no-domain-leak.md" not in url:
+                return [
+                    {
+                        "type": "file",
+                        "name": "no-domain-leak.md",
+                        "url": safe_url,
+                    }
+                ]
+            return payload
+
+        client._json = fake_json  # type: ignore[method-assign]
+        dest = tmp_path / "inv"
+        client.write_invariants(dest, "base-sha", "invariants")
+        written = (dest / "no-domain-leak.md").read_text(encoding="utf-8")
+        assert "id: no-domain-leak" in written
+        assert "## Rule" in written
