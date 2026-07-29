@@ -93,8 +93,8 @@ class TestIntegrationEndToEnd:
             ],
         )
         # Invariant file contents (base64-encoded empty)
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
-        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
+        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiBuby10ZW1wb3JhcnktbW9uaXRvcmluZwp0aXRsZTogTm8gdGVtcG9yYXJ5IG1vbml0b3Jpbmcgb3IgcmV0cnkgbG9vcHMgbWFza2luZyBhIHJvb3QtY2F1c2UgZml4CnNldmVyaXR5OiBlcnJvcgpzY29wZToKICBsYW5ndWFnZXM6IFtqYXZhXQogIGluY2x1ZGVfcGF0aHM6IFsic3JjL21haW4vamF2YS8qKiJdCi0tLQoKIyMgUnVsZQoKRG8gbm90IGFkZCBwb2xsaW5nIG9yIHdhaXQtcmV0cnkgbG9vcHMgdG8gbWFzayBhIG1pc3Npbmcgc3RhdGUgdHJhbnNpdGlvbi4KCiMjIFJhdGlvbmFsZQoKU3VjaCBsb29wcyBoaWRlIHRoZSByb290IGNhdXNlIGFuZCBjcmVhdGUgdW5vd25lZCBvcGVyYXRpb25hbCBsb2FkLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCgpBZGRpbmcgYSBzY2hlZHVsZXIgdGhhdCByZXBlYXRlZGx5IGNoZWNrcyBhbiBvcmRlciB1cGRhdGVkIGJ5IHRoZSBzYW1lIGNoYW5nZS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgZG9jdW1lbnRlZCBkYWlseSByZWNvbmNpbGlhdGlvbiBqb2IgdGhhdCBpcyB0aGUgc291cmNlIG9mIHRydXRoIGZvciB0aGF0IHByb2Nlc3MuCgo="})
         # Comments — empty
         transport.register("/issues/42/comments", 200, [])
         # POST new comment
@@ -182,8 +182,8 @@ class TestIntegrationEndToEnd:
             {"type": "file", "name": "no-temporary-monitoring.md",
              "url": "https://api.github.com/repos/owner/repo/contents/no-temporary-monitoring.md"},
         ])
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
-        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
+        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiBuby10ZW1wb3JhcnktbW9uaXRvcmluZwp0aXRsZTogTm8gdGVtcG9yYXJ5IG1vbml0b3Jpbmcgb3IgcmV0cnkgbG9vcHMgbWFza2luZyBhIHJvb3QtY2F1c2UgZml4CnNldmVyaXR5OiBlcnJvcgpzY29wZToKICBsYW5ndWFnZXM6IFtqYXZhXQogIGluY2x1ZGVfcGF0aHM6IFsic3JjL21haW4vamF2YS8qKiJdCi0tLQoKIyMgUnVsZQoKRG8gbm90IGFkZCBwb2xsaW5nIG9yIHdhaXQtcmV0cnkgbG9vcHMgdG8gbWFzayBhIG1pc3Npbmcgc3RhdGUgdHJhbnNpdGlvbi4KCiMjIFJhdGlvbmFsZQoKU3VjaCBsb29wcyBoaWRlIHRoZSByb290IGNhdXNlIGFuZCBjcmVhdGUgdW5vd25lZCBvcGVyYXRpb25hbCBsb2FkLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCgpBZGRpbmcgYSBzY2hlZHVsZXIgdGhhdCByZXBlYXRlZGx5IGNoZWNrcyBhbiBvcmRlciB1cGRhdGVkIGJ5IHRoZSBzYW1lIGNoYW5nZS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgZG9jdW1lbnRlZCBkYWlseSByZWNvbmNpbGlhdGlvbiBqb2IgdGhhdCBpcyB0aGUgc291cmNlIG9mIHRydXRoIGZvciB0aGF0IHByb2Nlc3MuCgo="})
         # Comments — published with incomplete assessment
         transport.register("/issues/42/comments", 200, [])
         transport.register("/issues/42/comments", 201, {"id": 100})
@@ -251,8 +251,8 @@ class TestIntegrationEndToEnd:
             {"type": "file", "name": "no-temporary-monitoring.md",
              "url": "https://api.github.com/repos/owner/repo/contents/no-temporary-monitoring.md"},
         ])
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
-        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
+        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiBuby10ZW1wb3JhcnktbW9uaXRvcmluZwp0aXRsZTogTm8gdGVtcG9yYXJ5IG1vbml0b3Jpbmcgb3IgcmV0cnkgbG9vcHMgbWFza2luZyBhIHJvb3QtY2F1c2UgZml4CnNldmVyaXR5OiBlcnJvcgpzY29wZToKICBsYW5ndWFnZXM6IFtqYXZhXQogIGluY2x1ZGVfcGF0aHM6IFsic3JjL21haW4vamF2YS8qKiJdCi0tLQoKIyMgUnVsZQoKRG8gbm90IGFkZCBwb2xsaW5nIG9yIHdhaXQtcmV0cnkgbG9vcHMgdG8gbWFzayBhIG1pc3Npbmcgc3RhdGUgdHJhbnNpdGlvbi4KCiMjIFJhdGlvbmFsZQoKU3VjaCBsb29wcyBoaWRlIHRoZSByb290IGNhdXNlIGFuZCBjcmVhdGUgdW5vd25lZCBvcGVyYXRpb25hbCBsb2FkLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCgpBZGRpbmcgYSBzY2hlZHVsZXIgdGhhdCByZXBlYXRlZGx5IGNoZWNrcyBhbiBvcmRlciB1cGRhdGVkIGJ5IHRoZSBzYW1lIGNoYW5nZS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgZG9jdW1lbnRlZCBkYWlseSByZWNvbmNpbGlhdGlvbiBqb2IgdGhhdCBpcyB0aGUgc291cmNlIG9mIHRydXRoIGZvciB0aGF0IHByb2Nlc3MuCgo="})
         # Page 1 — no owned comment
         transport.register(
             "/issues/42/comments",
@@ -325,8 +325,8 @@ class TestIntegrationEndToEnd:
             {"type": "file", "name": "no-temporary-monitoring.md",
              "url": "https://api.github.com/repos/owner/repo/contents/no-temporary-monitoring.md"},
         ])
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
-        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
+        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiBuby10ZW1wb3JhcnktbW9uaXRvcmluZwp0aXRsZTogTm8gdGVtcG9yYXJ5IG1vbml0b3Jpbmcgb3IgcmV0cnkgbG9vcHMgbWFza2luZyBhIHJvb3QtY2F1c2UgZml4CnNldmVyaXR5OiBlcnJvcgpzY29wZToKICBsYW5ndWFnZXM6IFtqYXZhXQogIGluY2x1ZGVfcGF0aHM6IFsic3JjL21haW4vamF2YS8qKiJdCi0tLQoKIyMgUnVsZQoKRG8gbm90IGFkZCBwb2xsaW5nIG9yIHdhaXQtcmV0cnkgbG9vcHMgdG8gbWFzayBhIG1pc3Npbmcgc3RhdGUgdHJhbnNpdGlvbi4KCiMjIFJhdGlvbmFsZQoKU3VjaCBsb29wcyBoaWRlIHRoZSByb290IGNhdXNlIGFuZCBjcmVhdGUgdW5vd25lZCBvcGVyYXRpb25hbCBsb2FkLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCgpBZGRpbmcgYSBzY2hlZHVsZXIgdGhhdCByZXBlYXRlZGx5IGNoZWNrcyBhbiBvcmRlciB1cGRhdGVkIGJ5IHRoZSBzYW1lIGNoYW5nZS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgZG9jdW1lbnRlZCBkYWlseSByZWNvbmNpbGlhdGlvbiBqb2IgdGhhdCBpcyB0aGUgc291cmNlIG9mIHRydXRoIGZvciB0aGF0IHByb2Nlc3MuCgo="})
         transport.register("/issues/42/comments", 200, [])
         transport.register("/issues/42/comments", 201, {"id": 100})
 
@@ -344,8 +344,11 @@ class TestIntegrationEndToEnd:
     def test_identity_uncertain_fails_safely_integration(
         self, monkeypatch, tmp_path: Path, capsys
     ) -> None:
-        """When /user returns non-dict, publish must fail safely (no comment
-        created/updated)."""
+        """Outside GitHub Actions, when /user returns non-dict, publish must
+        fail safely (no comment created/updated). Inside Actions the bot
+        ownership fallback applies instead.
+        """
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
         event = _write_event(tmp_path)
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
         monkeypatch.setenv("INPUT_GITHUB-TOKEN", "test-token")
@@ -377,8 +380,8 @@ class TestIntegrationEndToEnd:
             {"type": "file", "name": "no-temporary-monitoring.md",
              "url": "https://api.github.com/repos/owner/repo/contents/no-temporary-monitoring.md"},
         ])
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
-        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
+        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiBuby10ZW1wb3JhcnktbW9uaXRvcmluZwp0aXRsZTogTm8gdGVtcG9yYXJ5IG1vbml0b3Jpbmcgb3IgcmV0cnkgbG9vcHMgbWFza2luZyBhIHJvb3QtY2F1c2UgZml4CnNldmVyaXR5OiBlcnJvcgpzY29wZToKICBsYW5ndWFnZXM6IFtqYXZhXQogIGluY2x1ZGVfcGF0aHM6IFsic3JjL21haW4vamF2YS8qKiJdCi0tLQoKIyMgUnVsZQoKRG8gbm90IGFkZCBwb2xsaW5nIG9yIHdhaXQtcmV0cnkgbG9vcHMgdG8gbWFzayBhIG1pc3Npbmcgc3RhdGUgdHJhbnNpdGlvbi4KCiMjIFJhdGlvbmFsZQoKU3VjaCBsb29wcyBoaWRlIHRoZSByb290IGNhdXNlIGFuZCBjcmVhdGUgdW5vd25lZCBvcGVyYXRpb25hbCBsb2FkLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCgpBZGRpbmcgYSBzY2hlZHVsZXIgdGhhdCByZXBlYXRlZGx5IGNoZWNrcyBhbiBvcmRlciB1cGRhdGVkIGJ5IHRoZSBzYW1lIGNoYW5nZS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgZG9jdW1lbnRlZCBkYWlseSByZWNvbmNpbGlhdGlvbiBqb2IgdGhhdCBpcyB0aGUgc291cmNlIG9mIHRydXRoIGZvciB0aGF0IHByb2Nlc3MuCgo="})
         transport.register("/issues/42/comments", 200, [])
 
         original_init = GitHubClient.__init__
@@ -436,7 +439,7 @@ class TestIntegrationEndToEnd:
             {"type": "file", "name": "no-domain-leak.md",
              "url": "https://api.github.com/repos/owner/repo/contents/no-domain-leak.md"},
         ])
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
         # Comments
         transport.register("/issues/42/comments", 200, [])
         transport.register("/issues/42/comments", 201, {"id": 100})
@@ -510,8 +513,8 @@ class TestIntegrationEndToEnd:
             {"type": "file", "name": "no-temporary-monitoring.md",
              "url": "https://api.github.com/repos/owner/repo/contents/no-temporary-monitoring.md"},
         ])
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
-        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
+        transport.register("contents/no-temporary-monitoring.md", 200, {"content": "LS0tCmlkOiBuby10ZW1wb3JhcnktbW9uaXRvcmluZwp0aXRsZTogTm8gdGVtcG9yYXJ5IG1vbml0b3Jpbmcgb3IgcmV0cnkgbG9vcHMgbWFza2luZyBhIHJvb3QtY2F1c2UgZml4CnNldmVyaXR5OiBlcnJvcgpzY29wZToKICBsYW5ndWFnZXM6IFtqYXZhXQogIGluY2x1ZGVfcGF0aHM6IFsic3JjL21haW4vamF2YS8qKiJdCi0tLQoKIyMgUnVsZQoKRG8gbm90IGFkZCBwb2xsaW5nIG9yIHdhaXQtcmV0cnkgbG9vcHMgdG8gbWFzayBhIG1pc3Npbmcgc3RhdGUgdHJhbnNpdGlvbi4KCiMjIFJhdGlvbmFsZQoKU3VjaCBsb29wcyBoaWRlIHRoZSByb290IGNhdXNlIGFuZCBjcmVhdGUgdW5vd25lZCBvcGVyYXRpb25hbCBsb2FkLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCgpBZGRpbmcgYSBzY2hlZHVsZXIgdGhhdCByZXBlYXRlZGx5IGNoZWNrcyBhbiBvcmRlciB1cGRhdGVkIGJ5IHRoZSBzYW1lIGNoYW5nZS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgZG9jdW1lbnRlZCBkYWlseSByZWNvbmNpbGlhdGlvbiBqb2IgdGhhdCBpcyB0aGUgc291cmNlIG9mIHRydXRoIGZvciB0aGF0IHByb2Nlc3MuCgo="})
         # Page 1 — first owned Guardian comment, link to page 2
         transport.register(
             "/issues/42/comments",
@@ -666,7 +669,7 @@ class TestIntegrationFromSavedFixtures:
             {"type": "file", "name": "no-domain-leak.md",
              "url": "https://api.github.com/repos/owner/repo/contents/no-domain-leak.md"},
         ])
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
         transport.register("/issues/42/comments", 200, [])
         transport.register("/issues/42/comments", 201, {"id": 100})
 
@@ -714,7 +717,7 @@ class TestIntegrationFromSavedFixtures:
             {"type": "file", "name": "no-domain-leak.md",
              "url": "https://api.github.com/repos/owner/repo/contents/no-domain-leak.md"},
         ])
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
         transport.register("/issues/42/comments", 200, [])
         transport.register("/issues/42/comments", 201, {"id": 100})
 
@@ -771,7 +774,7 @@ class TestIntegrationFromSavedFixtures:
             {"type": "file", "name": "no-domain-leak.md",
              "url": "https://api.github.com/repos/owner/repo/contents/no-domain-leak.md"},
         ])
-        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiB0ZXN0CnRpdGxlOiBUZXN0IEludmFyaWFudApzZXZlcml0eTogZXJyb3IKc2NvcGU6CiAgbGFuZ3VhZ2VzOiBbamF2YV0KICBpbmNsdWRlX3BhdGhzOiBbc3JjLyoqXQotLS0KCiMjIFJ1bGUKVGVzdCBydWxlLgoKIyMgUmF0aW9uYWxlClRlc3QgcmF0aW9uYWxlLgoKIyMgVmlvbGF0aW5nIGV4YW1wbGVzCkJhZCBjb2RlLgoKIyMgQWNjZXB0YWJsZSBleGFtcGxlcwpHb29kIGNvZGUuCg=="})
+        transport.register("contents/no-domain-leak.md", 200, {"content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9tYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNjb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJzcmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRhcmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3IgaW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBpbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBpbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVudGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4KCg=="})
         # Page 1 — regular comment with next link
         transport.register(
             "/issues/42/comments",
