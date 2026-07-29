@@ -4,14 +4,16 @@ Invariant Guardian is a Python GitHub Action for repository-owned architecture i
 
 It is not a general code-review bot. A finding must map to an invariant declared in `.guardian/invariants/`, cite changed-code evidence, and explain the architectural consequence. Human review remains the final decision.
 
-## Current slice
+## Current release line (v0.2)
 
-The first runnable slice loads Markdown invariants and scans unified Java diffs for high-signal candidates related to:
+Version 0.2 is an advisory architecture assessment GitHub Action for Java/Spring pull requests. It supports exactly two repository-owned invariants:
 
-- temporary monitoring, polling, or wait-retry workarounds;
-- public boundaries that expose likely persistence/domain types.
+- `no-temporary-monitoring`
+- `no-domain-leak`
 
-Candidates are intentionally conservative. The evidence judge uses the OpenAI Python SDK against an OpenAI-compatible Chat Completions endpoint; the default is DeepSeek V4 Flash. Its live end-to-end verification remains pending a configured provider key.
+Deterministic Java AST analysis produces candidates. An OpenAI-compatible evidence judge (default DeepSeek V4 Flash) may only confirm or reject those candidates. The Action never executes pull-request code and never blocks merges by itself.
+
+Package version: `0.2.0`. The immutable git tag `v0.2.0` is created only after this line is merged and release gates pass — until then, pin a commit SHA or branch ref.
 
 ## Local use
 
@@ -79,6 +81,15 @@ For OpenAI, set `llm-base-url` to `https://api.openai.com/v1` and select a Chat 
 - **GitHub Actions:** add `DEEPSEEK_API_KEY` as a repository or organization Actions secret, then pass it through `llm-api-key`. Never put a key in `action.yml`, a workflow file, Docker build arguments, commit history, or logs.
 
 Copy .env.local.example to .env.local for the local variable names. The action runner also accepts LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL when invoked outside GitHub Actions.
+
+
+## Known limitations (v0.2)
+
+- Only the two supported invariant IDs above have detectors. Unsupported or duplicate IDs return `assessment_incomplete` rather than a false clean result.
+- Public helper methods on `@RestController` / `@Controller` classes are treated as public boundaries even without a method-level `@*Mapping` annotation. Tighten this in v0.3 if controller noise is too high.
+- Cross-module type resolution uses a bounded Git tree scan (entry and root caps). Failed or over-budget extra-root discovery no longer disables same-module primary-root resolution, but very large monorepos may still mark some cross-module leaks incomplete.
+- Nested generic leaves, overload identity, and Aggregate/PersistenceModel naming without JPA are supported for the advertised patterns; broader Java architecture claims are out of scope.
+- Live provider judgment is optional in CI. Provider failures always yield `assessment_incomplete`, never a false clean result.
 
 ## End-to-end verification
 
