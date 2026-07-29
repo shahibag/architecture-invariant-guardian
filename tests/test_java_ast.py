@@ -1432,3 +1432,182 @@ class TestClassifyTypeSuffixHeuristic:
                 f"Suffix {suffix}: expected low confidence without source_reader, "
                 f"got {candidates[0].get('confidence')}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Merge-readiness analyzer fixes
+# ---------------------------------------------------------------------------
+from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+
+class TestNestedGenericDomainLeak:
+    def test_response_entity_list_order_entity(self) -> None:
+        source = """
+package com.example;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.http.ResponseEntity;
+import java.util.List;
+@RestController
+class Api {
+    @GetMapping("/orders")
+    public ResponseEntity<List<OrderEntity>> list() { return null; }
+}
+"""
+        decls = {
+            "OrderEntity": (
+                "package com.example;\n"
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "public class OrderEntity {}\n"
+            )
+        }
+        findings = detect_domain_leak_candidates(
+            source,
+            "src/main/java/com/example/Api.java",
+            set(range(1, 20)),
+            source_reader=lambda name: decls.get(name),
+        )
+        assert findings, "nested ResponseEntity<List<OrderEntity>> must be a candidate"
+        assert any(f.get("confidence") == "medium" for f in findings)
+
+    def test_map_value_order_entity(self) -> None:
+        source = """
+package com.example;
+import org.springframework.web.bind.annotation.*;
+import java.util.Map;
+@RestController
+class Api {
+    @GetMapping("/orders")
+    public Map<String, OrderEntity> map() { return null; }
+}
+"""
+        decls = {
+            "OrderEntity": (
+                "package com.example;\n"
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "public class OrderEntity {}\n"
+            )
+        }
+        findings = detect_domain_leak_candidates(
+            source,
+            "src/main/java/com/example/Api.java",
+            set(range(1, 20)),
+            source_reader=lambda name: decls.get(name),
+        )
+        assert findings, "Map<String, OrderEntity> must be a candidate"
+        assert any(f.get("confidence") == "medium" for f in findings)
+
+    def test_optional_wildcard_extends_order_entity(self) -> None:
+        source = """
+package com.example;
+import org.springframework.web.bind.annotation.*;
+import java.util.Optional;
+@RestController
+class Api {
+    @GetMapping("/orders")
+    public Optional<? extends OrderEntity> opt() { return Optional.empty(); }
+}
+"""
+        decls = {
+            "OrderEntity": (
+                "package com.example;\n"
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "public class OrderEntity {}\n"
+            )
+        }
+        findings = detect_domain_leak_candidates(
+            source,
+            "src/main/java/com/example/Api.java",
+            set(range(1, 20)),
+            source_reader=lambda name: decls.get(name),
+        )
+        assert findings, "Optional<? extends OrderEntity> must be a candidate"
+        assert any(f.get("confidence") == "medium" for f in findings)
+
+
+class TestOverloadedMethodLookup:
+    def test_second_public_mapped_overload_is_detected(self) -> None:
+        source = """
+package com.example;
+import org.springframework.web.bind.annotation.*;
+@RestController
+class Api {
+    private OrderEntity get(String name) { return null; }
+    @GetMapping("/by-id")
+    public OrderEntity get(long id) { return null; }
+}
+"""
+        decls = {
+            "OrderEntity": (
+                "package com.example;\n"
+                "import jakarta.persistence.Entity;\n"
+                "@Entity\n"
+                "public class OrderEntity {}\n"
+            )
+        }
+        findings = detect_domain_leak_candidates(
+            source,
+            "src/main/java/com/example/Api.java",
+            set(range(1, 30)),
+            source_reader=lambda name: decls.get(name),
+        )
+        assert findings, "public mapped overload must not be hidden by private same-name method"
+        assert any(f.get("confidence") == "medium" for f in findings)
+
+
+class TestNamingSuffixWithoutJpa:
+    def test_aggregate_without_jpa_is_internal(self) -> None:
+        source = """
+package com.example;
+import org.springframework.web.bind.annotation.*;
+@RestController
+class Api {
+    @GetMapping("/cart")
+    public ShoppingCartAggregate get() { return null; }
+}
+"""
+        decls = {
+            "ShoppingCartAggregate": (
+                "package com.example;\n"
+                "public class ShoppingCartAggregate {\n"
+                "    private String id;\n"
+                "}\n"
+            )
+        }
+        findings = detect_domain_leak_candidates(
+            source,
+            "src/main/java/com/example/Api.java",
+            set(range(1, 20)),
+            source_reader=lambda name: decls.get(name),
+        )
+        assert findings, "Aggregate without JPA must still be internal"
+        assert any(f.get("confidence") == "medium" for f in findings)
+
+    def test_persistence_model_without_jpa_is_internal(self) -> None:
+        source = """
+package com.example;
+import org.springframework.web.bind.annotation.*;
+@RestController
+class Api {
+    @GetMapping("/cfg")
+    public ConfigPersistenceModel get() { return null; }
+}
+"""
+        decls = {
+            "ConfigPersistenceModel": (
+                "package com.example;\n"
+                "public class ConfigPersistenceModel {\n"
+                "    private String key;\n"
+                "}\n"
+            )
+        }
+        findings = detect_domain_leak_candidates(
+            source,
+            "src/main/java/com/example/Api.java",
+            set(range(1, 20)),
+            source_reader=lambda name: decls.get(name),
+        )
+        assert findings, "PersistenceModel without JPA must still be internal"
+        assert any(f.get("confidence") == "medium" for f in findings)

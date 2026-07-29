@@ -224,19 +224,21 @@ def _extract_method_info(
     if type_node is not None:
         return_type, return_type_args = _extract_type_with_args(type_node, source_bytes)
 
-    parameters: list[dict[str, str]] = []
+    parameters: list[dict[str, Any]] = []
     param_type_args: list[str] = []
     params_node = node.child_by_field_name("parameters")
     if params_node is not None:
         for child in params_node.children:
             if child.type == "formal_parameter":
-                param_info = _extract_parameter(child, source_bytes)
+                param_info: dict[str, Any] = _extract_parameter(child, source_bytes)
                 parameters.append(param_info)
                 # Collect type arguments from parameter types
                 ptype_node = child.child_by_field_name("type")
                 if ptype_node is not None:
                     _, p_args = _extract_type_with_args(ptype_node, source_bytes)
                     param_type_args.extend(p_args)
+                    # Keep leaf args on the parameter for detector use.
+                    param_info["type_arguments"] = p_args
 
     type_arguments: dict[str, list[str]] = {
         "return": return_type_args,
@@ -251,6 +253,8 @@ def _extract_method_info(
         "end_line": node.end_point[0] + 1,
         "start_byte": node.start_byte,
         "type_arguments": type_arguments,
+        # Keep the exact AST node so overload lookups never collapse by name.
+        "node": node,
     }
 
 
@@ -264,21 +268,65 @@ def _extract_parameter(
     return {"name": param_name, "type": param_type}
 
 
+def _collect_type_arg_leaves(
+    node: tree_sitter.Node, source_bytes: bytes, out: list[str]
+) -> None:
+    """Collect nested type-identifier leaves under generic/wildcard nodes.
+
+    Handles shapes such as ``List<OrderEntity>``,
+    ``ResponseEntity<List<OrderEntity>>``, ``Map<String, OrderEntity>``,
+    and ``Optional<? extends OrderEntity>``.
+    """
+    if node.type == "type_identifier":
+        out.append(_node_text(node, source_bytes))
+        return
+    if node.type == "scoped_type_identifier":
+        # Keep the right-most identifier (simple name).
+        name_node = node.child_by_field_name("name")
+        if name_node is not None:
+            out.append(_node_text(name_node, source_bytes))
+        else:
+            text = _node_text(node, source_bytes)
+            out.append(text.rsplit(".", 1)[-1])
+        return
+    for child in node.children:
+        if child.type in {
+            "type_identifier",
+            "scoped_type_identifier",
+            "generic_type",
+            "type_arguments",
+            "wildcard",
+        }:
+            _collect_type_arg_leaves(child, source_bytes, out)
+
+
 def _extract_type_with_args(
     node: tree_sitter.Node, source_bytes: bytes
 ) -> tuple[str, list[str]]:
-    """Return (type_name, [type_argument_names]) for a type node.
+    """Return (type_name, [leaf type-argument names]) for a type node.
 
-    For ``List<OrderEntity>`` this returns ``("List<OrderEntity>", ["OrderEntity"])``.
+    For ``ResponseEntity<List<OrderEntity>>`` this returns
+    ``("ResponseEntity<List<OrderEntity>>", ["OrderEntity"])``.
     """
     type_name = _node_text(node, source_bytes)
     type_args: list[str] = []
     for child in node.children:
         if child.type == "type_arguments":
-            for tc in child.children:
-                if tc.type == "type_identifier":
-                    type_args.append(_node_text(tc, source_bytes))
-    return type_name, type_args
+            _collect_type_arg_leaves(child, source_bytes, type_args)
+    # Preserve order while removing duplicates.
+    seen: set[str] = set()
+    unique_args: list[str] = []
+    for arg in type_args:
+        if arg not in seen:
+            seen.add(arg)
+            unique_args.append(arg)
+    return type_name, unique_args
+
+
+def _simple_type_name(type_name: str) -> str:
+    """Return the outermost simple type name without generics or packages."""
+    base = type_name.split("<", 1)[0].strip()
+    return base.rsplit(".", 1)[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -639,8 +687,11 @@ def detect_domain_leak_candidates(
                 if not changed_lines.intersection(method_range):
                     continue
 
-            method_node_ref = _find_method_node(class_node, method["name"],
-                                                source_bytes)
+            method_node_ref = method.get("node")
+            if method_node_ref is None:
+                method_node_ref = _find_method_node(
+                    class_node, method["name"], source_bytes
+                )
             if method_node_ref is None:
                 continue
 
@@ -672,12 +723,14 @@ def detect_domain_leak_candidates(
             ret_type_args = method.get("type_arguments", {}).get("return", [])
             outcome = _classify_type(ret_type, internal_types, acceptable_names,
                                      source_reader)
-            # Also check type arguments
+            # Container/wrapper outer types are acceptable; inspect nested leaves.
             if outcome == "acceptable":
                 for ta in ret_type_args:
-                    outcome = _classify_type(ta, internal_types, acceptable_names,
-                                             source_reader)
-                    if outcome in ("internal", "unavailable"):
+                    nested = _classify_type(
+                        ta, internal_types, acceptable_names, source_reader
+                    )
+                    if nested in ("internal", "unavailable"):
+                        outcome = nested
                         ret_type = ta
                         break
 
@@ -699,8 +752,18 @@ def detect_domain_leak_candidates(
             # --- Check parameter types ---
             for param in method.get("parameters", []):
                 ptype = param["type"]
-                outcome = _classify_type(ptype, internal_types, acceptable_names,
-                                         source_reader)
+                outcome = _classify_type(
+                    ptype, internal_types, acceptable_names, source_reader
+                )
+                if outcome == "acceptable":
+                    for ta in param.get("type_arguments", []):
+                        nested = _classify_type(
+                            ta, internal_types, acceptable_names, source_reader
+                        )
+                        if nested in ("internal", "unavailable"):
+                            outcome = nested
+                            ptype = ta
+                            break
                 if outcome in ("internal", "unavailable"):
                     _add_domain_leak_candidate(
                         candidates, file_path, candidate_line,
@@ -731,10 +794,8 @@ def _add_domain_leak_candidate(
     related_evidence: str | None = None
 
     # Determine confidence level
-    # Strip generic wrappers for matching: "List<OrderEntity>" → "OrderEntity"
-    simple_type = type_name
-    if "<" in simple_type:
-        simple_type = simple_type.split("<", 1)[-1].rstrip(">")
+    # Prefer the outermost/simple leaf already selected by the detector.
+    simple_type = _simple_type_name(type_name)
     if type_name in internal_types or simple_type in internal_types:
         # Same-file JPA-annotated — confirmed internal
         confidence = "medium"
@@ -743,10 +804,10 @@ def _add_domain_leak_candidate(
         # Use the simple type name (without generics) for resolution.
         declaration, _ = _resolve_type_from_source(simple_type, source_reader)
         if declaration is not None and _validate_related_declaration(
-            declaration, type_name
+            declaration, simple_type
         ):
             related_evidence = (
-                f"Declaration of {type_name}:\n{declaration}"
+                f"Declaration of {simple_type}:\n{declaration}"
             )
             # Truncate declaration to a bounded size
             max_decl_bytes = 100_000  # MAX_SOURCE_BYTES_PER_FILE
@@ -814,11 +875,13 @@ def _classify_type(
     1. Same-file JPA-annotated declaration → internal.
     2. Other valid same-file declarations → acceptable.
     3. With a source reader, resolve and structurally classify the declaration:
-       JPA class → internal; record/enum/interface/non-JPA class → acceptable;
+       JPA class → internal;
+       class named ``*Aggregate`` / ``*PersistenceModel`` → internal;
+       record/enum/interface/non-JPA ``*Entity`` class → acceptable;
        missing/malformed/mismatched evidence → unavailable.
     4. Without a source reader only, retain the legacy suffix heuristic.
     """
-    simple = type_name.split("<", 1)[-1].rstrip(">").rsplit(".", 1)[-1]
+    simple = _simple_type_name(type_name)
     if simple in {
         "void", "boolean", "byte", "short", "int", "long", "float", "double",
         "char", "String", "Object", "UUID", "BigDecimal", "BigInteger",
@@ -828,7 +891,7 @@ def _classify_type(
         return "acceptable"
 
     # 1 & 2: same-file classification
-    if type_name in known_internal:
+    if type_name in known_internal or simple in known_internal:
         return "internal"
     if type_name in acceptable_names or simple in acceptable_names:
         return "acceptable"
@@ -859,7 +922,14 @@ def _classify_type(
                 jpa_anns = find_annotations(
                     class_node, _JPA_ENTITY_ANNOTATIONS, decl_bytes
                 )
-                return "internal" if jpa_anns else "acceptable"
+                if jpa_anns:
+                    return "internal"
+                # DDD aggregate / persistence-model naming is internal even
+                # without JPA annotations. Plain *Entity classes without JPA
+                # remain acceptable to avoid DTO false positives.
+                if simple.endswith(("Aggregate", "PersistenceModel")):
+                    return "internal"
+                return "acceptable"
         return "unavailable"
 
     # Legacy direct/local callers without repository source access retain the
@@ -876,7 +946,7 @@ def _validate_related_declaration(declaration: str, type_name: str) -> bool:
     1. Parse as valid Java (no ERROR/MISSING nodes)
     2. Declare *type_name* as a type (class, not record/enum/interface)
     3. Carry a supported JPA annotation (@Entity, @MappedSuperclass,
-       @Embeddable)
+       @Embeddable), **or** use an Aggregate/PersistenceModel naming suffix
 
     Returns ``False`` for records, DTOs, events, public contracts,
     malformed Java, or mismatched type names.
@@ -889,21 +959,24 @@ def _validate_related_declaration(declaration: str, type_name: str) -> bool:
 
     source_bytes = declaration.encode("utf-8")
     decls = find_class_declarations(tree, source_bytes)
+    simple = _simple_type_name(type_name)
 
     for d in decls:
-        if d["name"] != type_name:
+        if d["name"] != simple and d["name"] != type_name:
             continue
         # Must be a class, not record/enum/interface
         if d.get("kind") != "class":
             return False
-        # Must have JPA annotation evidence
+        # Must have JPA annotation evidence or a supported internal suffix.
         class_node = d.get("node")
         if class_node is None:
             return False
         jpa_anns = find_annotations(
             class_node, _JPA_ENTITY_ANNOTATIONS, source_bytes
         )
-        return bool(jpa_anns)
+        if jpa_anns:
+            return True
+        return simple.endswith(("Aggregate", "PersistenceModel"))
 
     # Type name not found in the declaration
     return False
@@ -1002,8 +1075,11 @@ def detect_monitoring_candidates(
                 if not changed_lines.intersection(method_range):
                     continue
 
-            method_node_ref = _find_method_node(class_node, method["name"],
-                                                source_bytes)
+            method_node_ref = method.get("node")
+            if method_node_ref is None:
+                method_node_ref = _find_method_node(
+                    class_node, method["name"], source_bytes
+                )
             if method_node_ref is None:
                 continue
 
