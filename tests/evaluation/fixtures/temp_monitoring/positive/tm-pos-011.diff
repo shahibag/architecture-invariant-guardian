@@ -1,0 +1,14 @@
+--- a/src/main/java/com/example/EventMonitor.java
++++ b/src/main/java/com/example/EventMonitor.java
+@@ -1,5 +1,5 @@
+ import org.springframework.scheduling.annotation.Scheduled;
+ class EventMonitor {
++    @Scheduled(
+         fixedRate = 10000,
+         initialDelay = 5000
+@@ -6,5 +6,5 @@
+     )
++    public void emitPending() {
+         eventBus.emit(pendingEvents);
+     }
+ }

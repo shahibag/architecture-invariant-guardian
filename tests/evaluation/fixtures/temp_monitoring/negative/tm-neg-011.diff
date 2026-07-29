@@ -1,0 +1,8 @@
+--- a/src/main/java/com/example/OldScheduler.java
++++ b/src/main/java/com/example/OldScheduler.java
+@@ -1,5 +1,5 @@
+ import org.springframework.scheduling.annotation.Scheduled;
+ class OldScheduler {
+     @Scheduled(fixedDelay = 5000)
+     public void oldMethod() { save(); }
+ }

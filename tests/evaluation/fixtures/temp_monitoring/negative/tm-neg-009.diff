@@ -1,0 +1,9 @@
+--- a/src/main/java/com/example/SafeCode.java
++++ b/src/main/java/com/example/SafeCode.java
+@@ -1,6 +1,6 @@
+ class SafeCode {
+     void log() {
++        String code = "while (true) { save(); }";
+         logger.info(code);
+     }
+ }

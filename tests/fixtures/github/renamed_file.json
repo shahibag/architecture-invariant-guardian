@@ -1,0 +1,8 @@
+[
+  {
+    "filename": "src/main/java/com/example/New.java",
+    "status": "renamed",
+    "previous_filename": "src/main/java/com/example/Old.java",
+    "patch": "@@ -1 +1 @@\n rename"
+  }
+]
