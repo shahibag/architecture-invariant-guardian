@@ -474,9 +474,16 @@ class TestAuthenticatedIdentity:
         # Must NOT use hardcoded BOT_LOGIN — must use authenticated identity
         assert any("PATCH" in c for c in call_log), f"Expected PATCH, got {call_log}"
 
-    def test_publish_fails_when_authenticated_identity_unavailable(self) -> None:
-        """When the /user endpoint cannot confirm the bot's identity,
-        publish must raise RuntimeError — never guess or use BOT_LOGIN alone."""
+    def test_publish_fails_when_authenticated_identity_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Outside GitHub Actions, when /user cannot confirm identity,
+        publish must raise RuntimeError — never guess BOT_LOGIN alone.
+
+        Inside Actions, installation tokens fall back to github-actions[bot]
+        (see TestGitHubActionsTokenOwnership).
+        """
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
         client = GitHubClient("token", "owner/repo", 42)
         mutation_calls: list[str] = []
@@ -3052,3 +3059,243 @@ class TestLinkParserStrictRfc8288:
         assert len(mutation_calls) == 0, (
             "P1#3: No PATCH/POST when Link header has trailing comma"
         )
+
+
+# ---------------------------------------------------------------------------
+# Standard GITHUB_TOKEN / GitHub Actions ownership policy
+# ---------------------------------------------------------------------------
+class TestGitHubActionsTokenOwnership:
+    """Publication must work with the standard Actions GITHUB_TOKEN.
+
+    Installation tokens cannot call GET /user successfully. Comments created
+    with secrets.GITHUB_TOKEN are authored as github-actions[bot]. Ownership
+    must therefore use an explicit bot policy in Actions rather than requiring
+    /user identity discovery.
+    """
+
+    def test_publish_creates_comment_when_user_endpoint_fails_in_actions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        client = GitHubClient("token", "owner/repo", 42)
+        call_log: list[tuple[str, str]] = []
+
+        def fake_json_with_link(
+            url: str,
+            method: str = "GET",
+            payload: dict | None = None,
+        ) -> tuple[object, str]:
+            return ([], "")
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            call_log.append((method, url))
+            if url.rstrip("/").endswith("/user") or url.endswith("/user"):
+                raise RuntimeError("GitHub API request failed with status 403")
+            if method == "POST":
+                return {"id": 501, "user": {"login": "github-actions[bot]"}}
+            return {}
+
+        client._json_with_link = fake_json_with_link  # type: ignore[method-assign]
+        client._json = fake_json  # type: ignore[method-assign]
+
+        client.publish(
+            "<!-- invariant-guardian:v2:abcdef0123456789 -->\nFirst assessment.",
+            "abcdef0123456789",
+        )
+
+        post_calls = [c for c in call_log if c[0] == "POST"]
+        assert len(post_calls) == 1, f"Expected POST create, got {call_log}"
+
+    def test_publish_updates_bot_comment_when_user_endpoint_fails_in_actions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        client = GitHubClient("token", "owner/repo", 42)
+        call_log: list[tuple[str, str]] = []
+        existing_body = "<!-- invariant-guardian:v2:abcdef0123456789 -->\nOld."
+        new_body = "<!-- invariant-guardian:v2:abcdef0123456789 -->\nUpdated."
+
+        def fake_json_with_link(
+            url: str,
+            method: str = "GET",
+            payload: dict | None = None,
+        ) -> tuple[object, str]:
+            return (
+                [
+                    {
+                        "id": 77,
+                        "body": existing_body,
+                        "user": {"login": "github-actions[bot]"},
+                    }
+                ],
+                "",
+            )
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            call_log.append((method, url))
+            if url.rstrip("/").endswith("/user") or url.endswith("/user"):
+                raise RuntimeError("GitHub API request failed with status 403")
+            return {}
+
+        client._json_with_link = fake_json_with_link  # type: ignore[method-assign]
+        client._json = fake_json  # type: ignore[method-assign]
+
+        client.publish(new_body, "abcdef0123456789")
+
+        patch_calls = [c for c in call_log if c[0] == "PATCH" and "/77" in c[1]]
+        assert len(patch_calls) == 1, f"Expected PATCH of bot comment, got {call_log}"
+        assert not any(c[0] == "POST" for c in call_log)
+
+    def test_publish_skips_identical_bot_comment_in_actions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        client = GitHubClient("token", "owner/repo", 42)
+        body = "<!-- invariant-guardian:v2:abcdef0123456789 -->\nSame."
+        mutations: list[str] = []
+
+        def fake_json_with_link(
+            url: str,
+            method: str = "GET",
+            payload: dict | None = None,
+        ) -> tuple[object, str]:
+            return (
+                [
+                    {
+                        "id": 88,
+                        "body": body,
+                        "user": {"login": "github-actions[bot]"},
+                    }
+                ],
+                "",
+            )
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if url.rstrip("/").endswith("/user") or url.endswith("/user"):
+                raise RuntimeError("GitHub API request failed with status 403")
+            if method in ("PATCH", "POST"):
+                mutations.append(method)
+            return {}
+
+        client._json_with_link = fake_json_with_link  # type: ignore[method-assign]
+        client._json = fake_json  # type: ignore[method-assign]
+
+        client.publish(body, "abcdef0123456789")
+        assert mutations == []
+
+    def test_publish_ignores_contributor_copied_marker_in_actions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        client = GitHubClient("token", "owner/repo", 42)
+        call_log: list[tuple[str, str]] = []
+
+        def fake_json_with_link(
+            url: str,
+            method: str = "GET",
+            payload: dict | None = None,
+        ) -> tuple[object, str]:
+            return (
+                [
+                    {
+                        "id": 11,
+                        "body": "<!-- invariant-guardian:v2:abcdef0123456789 -->\nCopied!",
+                        "user": {"login": "human-reviewer"},
+                    }
+                ],
+                "",
+            )
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            call_log.append((method, url))
+            if url.rstrip("/").endswith("/user") or url.endswith("/user"):
+                raise RuntimeError("GitHub API request failed with status 403")
+            return {"id": 12}
+
+        client._json_with_link = fake_json_with_link  # type: ignore[method-assign]
+        client._json = fake_json  # type: ignore[method-assign]
+
+        client.publish(
+            "<!-- invariant-guardian:v2:abcdef0123456789 -->\nBot body.",
+            "abcdef0123456789",
+        )
+
+        assert not any(c[0] == "PATCH" for c in call_log)
+        assert any(c[0] == "POST" for c in call_log)
+
+    def test_publish_still_fails_outside_actions_without_identity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        client = GitHubClient("token", "owner/repo", 42)
+        mutations: list[str] = []
+
+        def fake_json_with_link(
+            url: str,
+            method: str = "GET",
+            payload: dict | None = None,
+        ) -> tuple[object, str]:
+            return ([], "")
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            if url.rstrip("/").endswith("/user") or url.endswith("/user"):
+                raise RuntimeError("GitHub API request failed with status 403")
+            if method in ("PATCH", "POST"):
+                mutations.append(method)
+            return {}
+
+        client._json_with_link = fake_json_with_link  # type: ignore[method-assign]
+        client._json = fake_json  # type: ignore[method-assign]
+
+        with pytest.raises(RuntimeError, match="identity"):
+            client.publish(
+                "<!-- invariant-guardian:v2:abcdef0123456789 -->\nBody.",
+                "abcdef0123456789",
+            )
+        assert mutations == []
+
+    def test_publish_prefers_authenticated_login_over_bot_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A PAT that can call /user must own comments as that login, not the bot constant."""
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        client = GitHubClient("token", "owner/repo", 42)
+        call_log: list[tuple[str, str]] = []
+
+        def fake_json_with_link(
+            url: str,
+            method: str = "GET",
+            payload: dict | None = None,
+        ) -> tuple[object, str]:
+            return (
+                [
+                    {
+                        "id": 42,
+                        "body": "<!-- invariant-guardian:v2:abcdef0123456789 -->\nOld bot.",
+                        "user": {"login": "github-actions[bot]"},
+                    },
+                    {
+                        "id": 43,
+                        "body": "<!-- invariant-guardian:v2:abcdef0123456789 -->\nOld pat.",
+                        "user": {"login": "release-bot"},
+                    },
+                ],
+                "",
+            )
+
+        def fake_json(url: str, method: str = "GET", payload=None) -> object:
+            call_log.append((method, url))
+            if url.rstrip("/").endswith("/user") or url.endswith("/user"):
+                return {"login": "release-bot"}
+            return {}
+
+        client._json_with_link = fake_json_with_link  # type: ignore[method-assign]
+        client._json = fake_json  # type: ignore[method-assign]
+
+        client.publish(
+            "<!-- invariant-guardian:v2:abcdef0123456789 -->\nNew pat.",
+            "abcdef0123456789",
+        )
+
+        assert any(c[0] == "PATCH" and "/43" in c[1] for c in call_log)
+        assert not any(c[0] == "PATCH" and "/42" in c[1] for c in call_log)

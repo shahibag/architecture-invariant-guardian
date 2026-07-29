@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -196,10 +197,12 @@ class GitHubClient:
 
         # Collect directories containing .java files (bounded)
         roots: set[str] = set()
-        max_entries = 500  # hard cap — never unbounded
+        # Bound scan work without disabling root discovery on ordinary repos.
+        # Extra-root usage is still capped below; primary-root resolve always works.
+        max_entries = 20_000  # hard cap — never unbounded
         if len(entries) > max_entries:
-            self._source_roots_cache[ref] = None
-            return None
+            # Truncate rather than disable: keep a partial scan of early entries.
+            entries = entries[:max_entries]
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
@@ -493,11 +496,15 @@ class GitHubClient:
             (destination / name).write_bytes(decoded_bytes)
 
     def authenticated_login(self) -> str | None:
-        """Retrieve and cache the authenticated bot identity from /user.
+        """Retrieve and cache the authenticated identity from /user when available.
 
         Returns the login string, or ``None`` when the identity cannot be
         confirmed (non-dict response, missing login key, API error).
         The result is cached so the user endpoint is called at most once.
+
+        Installation ``GITHUB_TOKEN`` values used by GitHub Actions typically
+        cannot call ``GET /user``. Callers that need a publication owner should
+        use :meth:`publication_identity`, which applies the Actions bot policy.
         """
         if self._cached_login is not None:
             return self._cached_login
@@ -516,6 +523,23 @@ class GitHubClient:
         self._cached_login = login
         return login
 
+    def publication_identity(self) -> str | None:
+        """Return the login used to own Guardian comments.
+
+        Preference order:
+        1. Successful ``GET /user`` login (PAT / app user tokens).
+        2. ``github-actions[bot]`` when running inside GitHub Actions, because
+           the standard installation ``GITHUB_TOKEN`` authors comments as that
+           bot and cannot call ``GET /user``.
+        3. ``None`` outside Actions when identity cannot be confirmed.
+        """
+        login = self.authenticated_login()
+        if login is not None:
+            return login
+        if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+            return BOT_LOGIN
+        return None
+
     def publish(self, body: str, fingerprint_key: str) -> None:
         """Create or update the bot-owned Guardian comment.
 
@@ -526,6 +550,8 @@ class GitHubClient:
           duplicates when an owned comment may exist on an unseen page.
         - *fingerprint_key* must be exactly 16 lowercase hex characters
           and must match the key in any existing owned comment's marker.
+        - Inside GitHub Actions, ownership uses ``github-actions[bot]`` when
+          ``GET /user`` is unavailable (standard ``GITHUB_TOKEN`` path).
         """
         # Validate fingerprint_key
         if not _FINGERPRINT_RE.match(fingerprint_key):
@@ -608,8 +634,8 @@ class GitHubClient:
         if url and not pagination_uncertain:
             pagination_uncertain = True
 
-        # --- confirm authenticated identity ------------------------------------
-        identity = self.authenticated_login()
+        # --- confirm publication identity --------------------------------------
+        identity = self.publication_identity()
         if identity is None:
             raise RuntimeError(
                 "Cannot publish Guardian comment: authenticated bot identity "
