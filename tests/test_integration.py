@@ -456,17 +456,18 @@ class TestIntegrationEndToEnd:
         assert exit_code == 0
 
         output = json.loads(capsys.readouterr().out)
-        # Must be assessment_incomplete (missing patch → changed_files RuntimeError)
+        # Missing patch is a per-file coverage gap → assessment_incomplete.
         assert output["status"] == AssessmentStatus.INCOMPLETE.value, (
             f"P2.1: Expected assessment_incomplete, got {output['status']}"
         )
         assert output["coverage"]["context_truncated"] is True
-        # Must have sanitized changed-files warning
         assert any(
-            "changed files" in w.get("message", "").lower()
+            "could not be evaluated" in w.get("message", "").lower()
+            or "coverage" in w.get("category", "").lower()
+            or "changed files" in w.get("message", "").lower()
             or "file listing" in w.get("message", "").lower()
             for w in output.get("warnings", [])
-        ), f"P2.1: Expected changed-files warning, got {output.get('warnings')}"
+        ), f"P2.1: Expected coverage/changed-files warning, got {output.get('warnings')}"
         # Must NOT have provider_usage (no judge was called)
         assert output["provider_usage"] is None, "P2.1: No judge must be called"
         # Zero candidates/violations

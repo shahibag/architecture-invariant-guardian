@@ -1585,14 +1585,16 @@ class TestChangedFilesPagination:
             client.changed_files()
 
     def test_missing_non_removed_patch_is_incomplete(self) -> None:
-        """Missing patch on a modified file must raise RuntimeError."""
+        """Missing patch on a modified file is returned with patch_complete=False."""
         client = GitHubClient("token", "owner/repo", 42)
         client._json_with_link = lambda url: (  # type: ignore[method-assign]
             [{"filename": "src/Foo.java", "status": "modified"}],
             "",
         )
-        with pytest.raises(RuntimeError, match="incomplete|unavailable"):
-            client.changed_files()
+        [changed] = client.changed_files()
+        assert changed.path == "src/Foo.java"
+        assert changed.patch is None
+        assert changed.patch_complete is False
 
     def test_renamed_file_captures_previous_filename(self) -> None:
         """Renamed files must expose previous_filename from the API."""
@@ -1668,14 +1670,16 @@ class TestChangedFilesPagination:
             client.changed_files()
 
     def test_missing_patch_on_added_file_raises_unavailability(self) -> None:
-        """Missing patch on an added file must raise RuntimeError."""
+        """Missing patch on an added file is returned with patch_complete=False."""
         client = GitHubClient("token", "owner/repo", 42)
         client._json_with_link = lambda url: (  # type: ignore[method-assign]
             [{"filename": "src/New.java", "status": "added"}],
             "",
         )
-        with pytest.raises(RuntimeError, match="incomplete|unavailable|uncertain"):
-            client.changed_files()
+        [changed] = client.changed_files()
+        assert changed.status == "added"
+        assert changed.patch is None
+        assert changed.patch_complete is False
 
     def test_off_origin_next_link_raises_unavailability(self) -> None:
         """Off-origin Link rel=next must raise RuntimeError."""
@@ -1871,26 +1875,26 @@ class TestChangedFilesPagination:
             client.changed_files()
 
     def test_patch_is_dict_not_string_raises_uncertain(self) -> None:
-        """A patch value that is not a string (e.g. a dict) must be treated
-        as a missing patch → uncertainty for added/modified files."""
+        """A non-string patch is treated as missing → patch_complete=False."""
         client = GitHubClient("token", "owner/repo", 42)
         client._json_with_link = lambda url: (  # type: ignore[method-assign]
             [{"filename": "src/A.java", "status": "modified", "patch": {}}],
             "",
         )
-        with pytest.raises(RuntimeError, match="incomplete|unavailable"):
-            client.changed_files()
+        [changed] = client.changed_files()
+        assert changed.patch is None
+        assert changed.patch_complete is False
 
     def test_patch_is_int_not_string_raises_uncertain(self) -> None:
-        """A patch value that is an int must be treated as missing →
-        uncertainty for added files."""
+        """A non-string patch is treated as missing → patch_complete=False."""
         client = GitHubClient("token", "owner/repo", 42)
         client._json_with_link = lambda url: (  # type: ignore[method-assign]
             [{"filename": "src/New.java", "status": "added", "patch": 12345}],
             "",
         )
-        with pytest.raises(RuntimeError, match="incomplete|unavailable"):
-            client.changed_files()
+        [changed] = client.changed_files()
+        assert changed.patch is None
+        assert changed.patch_complete is False
 
     def test_filename_is_empty_string_raises_uncertain(self) -> None:
         """An empty string filename must cause uncertainty."""
