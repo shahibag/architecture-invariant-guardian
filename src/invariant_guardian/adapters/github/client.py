@@ -15,19 +15,6 @@ from urllib.request import Request, urlopen
 
 _FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
 
-# Phase 3 fail-closed: safe repository-relative filename validation
-# Must be nonempty, no NUL, no leading slash, no . or .. components,
-# and must not contain backslash (Windows separator in POSIX context).
-_FILENAME_SAFE_RE = re.compile(
-    r"^[^\x00/](?!.*[.]{2})(?!.*[/\\][.]{2}[^/\x00]*$)"
-)
-# Simpler structural checks — avoid regex for clarity:
-# - nonempty
-# - no NUL byte
-# - no leading slash
-# - no . or .. as path components
-# - no backslash (POSIX context)
-
 
 def _is_safe_repo_path(path: str) -> bool:
     """Return True when *path* is a safe, nonempty repository-relative
@@ -49,13 +36,6 @@ def _is_safe_repo_path(path: str) -> bool:
         if not part:
             return False  # empty component (// or trailing /)
     return True
-
-# Allowed URL pattern — only HTTPS api.github.com
-# Must not accept github.com (web), raw.githubusercontent.com, or any other host
-_ALLOWED_URL_RE = re.compile(r"^https://api\.github\.com/")
-# Repository resource prefix for same-origin checks
-# self._base = "https://api.github.com/repos/owner/repo"
-_CONTENTS_PREFIX_RE = re.compile(r"^https://api\.github\.com/repos/[^/]+/[^/]+/contents/")
 
 # RFC 8288 link-value pattern: <url> *(; param=value)
 # Used to validate Link headers — rejects ambiguous rel syntax.
@@ -743,8 +723,7 @@ class GitHubClient:
         """Phase 3 fail-closed: structural URL validation via :func:`urlparse`.
 
         Rejects any URL that is not exactly ``https://api.github.com/...``
-        with no userinfo, port, or fragment.  This replaces the prefix-based
-        ``_ALLOWED_URL_RE`` check with a structural one that cannot be
+        with no userinfo, port, or fragment.  The structural check cannot be
         tricked by hostname suffix/prefix attacks or encoded separators.
 
         Raises :class:`RuntimeError` (sanitised) on any violation,
