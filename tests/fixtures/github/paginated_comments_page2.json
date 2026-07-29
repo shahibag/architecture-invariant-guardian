@@ -1,0 +1,7 @@
+[
+  {
+    "id": 99,
+    "body": "<!-- invariant-guardian:v2:abcdef0123456789 -->\nOld assessment.",
+    "user": {"login": "github-actions[bot]"}
+  }
+]

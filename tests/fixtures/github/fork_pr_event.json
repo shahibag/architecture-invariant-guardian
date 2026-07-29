@@ -1,0 +1,8 @@
+{
+  "repository": {"full_name": "owner/repo"},
+  "number": 1,
+  "pull_request": {
+    "base": {"sha": "base-sha"},
+    "head": {"sha": "head-sha", "repo": {"fork": true}}
+  }
+}

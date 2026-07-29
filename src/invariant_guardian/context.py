@@ -24,6 +24,26 @@ MAX_SOURCE_BYTES_PER_FILE = 100_000
 MAX_MODEL_CONTEXT_CHARS = 60_000
 CONTEXT_LINES = 40
 
+# Phase 3 — Comment pagination bounds
+# Conservative ceilings: GitHub defaults to 30 per page, max 100.
+# 10 pages × 100 = 1 000 comments is far beyond any realistic PR.
+MAX_COMMENT_PAGES = 10
+MAX_COMMENTS = 1_000
+MAX_COMMENT_BYTES = 1_000_000  # 1 MiB of JSON response body
+
+# Phase 3 — Changed-file pagination bounds
+# GitHub's /files endpoint returns 100 items per page by default.
+# 20 pages × 100 = 2 000 files is well beyond any realistic PR.
+MAX_CHANGED_FILE_PAGES = 20
+MAX_CHANGED_FILE_BYTES = 5_000_000  # 5 MiB of JSON response body
+
+# Phase 3 — HTTP response bounds
+# GitHub REST API responses rarely exceed a few MiB.  10 MiB is a
+# generous ceiling that still protects against runaway allocations.
+MAX_RESPONSE_BYTES = 10_000_000  # 10 MiB
+MAX_HTTP_RETRIES = 3
+MAX_RETRY_DELAY = 10  # seconds
+
 # Binary content detection — files containing null bytes or with high
 # ratios of non-printable characters are rejected
 _BINARY_THRESHOLD = 0.10  # reject when >10% of initial bytes are non-printable

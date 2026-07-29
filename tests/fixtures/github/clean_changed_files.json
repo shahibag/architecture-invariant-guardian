@@ -1,0 +1,10 @@
+[
+  {
+    "filename": "src/main/java/com/example/Service.java",
+    "status": "modified",
+    "patch": "@@ -10,3 +10,5 @@ public class Service {\n     private final Repo repo;\n+    public String getName() { return \"ok\"; }\n }",
+    "additions": 1,
+    "deletions": 0,
+    "changes": 1
+  }
+]

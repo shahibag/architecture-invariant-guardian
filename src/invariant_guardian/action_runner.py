@@ -72,15 +72,44 @@ def run() -> int:
     with TemporaryDirectory(prefix="invariant-guardian-") as temp:
         # --- load invariants ------------------------------------------------
         invariant_dir = Path(temp) / "invariants"
-        client.write_invariants(
-            invariant_dir,
-            pull_request["base"]["sha"],
-            os.environ.get("INPUT_INVARIANT-PATH", ".guardian/invariants"),
-        )
-        invariants, warnings = load_invariants(invariant_dir)
+        # P1.3: catch all expected adapter failures at the outer Action boundary
+        invariants_unavailable = False
+        try:
+            client.write_invariants(
+                invariant_dir,
+                pull_request["base"]["sha"],
+                os.environ.get("INPUT_INVARIANT-PATH", ".guardian/invariants"),
+            )
+            invariants, warnings = load_invariants(invariant_dir)
+        except (RuntimeError, TypeError, OSError):
+            # Sanitised adapter / filesystem failure — never leak raw error
+            invariants = []
+            warnings = []
+            invariants_unavailable = True
+
+        # --- invariants unavailable → safe incomplete output ------------------
+        if invariants_unavailable:
+            assessment = Assessment(
+                status=AssessmentStatus.INCOMPLETE,
+                coverage=Coverage(context_truncated=True),
+                warnings=[
+                    SafeWarning(
+                        category="invariants",
+                        message="Invariant loading failed — invariants are unavailable.",
+                    ),
+                ],
+            )
+            _write_action_outputs(assessment)
+            print(json.dumps(assessment.model_dump(mode="json")))
+            return 0
 
         # --- fetch changed files via SourceReader (GitHub files endpoint) ---
-        changed_files = client.changed_files()
+        try:
+            changed_files = client.changed_files()
+            files_uncertain = False
+        except RuntimeError:
+            changed_files = []
+            files_uncertain = True
 
         # --- build request & assess via engine ------------------------------
         engine = ReviewEngine()
@@ -90,6 +119,39 @@ def run() -> int:
             invariants=invariants,
             changed_files=changed_files,
         )
+
+        if files_uncertain:
+            # Changed-file listing was incomplete — skip assessment entirely
+            assessment = Assessment(
+                status=AssessmentStatus.INCOMPLETE,
+                coverage=Coverage(context_truncated=True),
+                warnings=[
+                    SafeWarning(
+                        category="changed-files",
+                        message="Changed file listing is incomplete or unavailable.",
+                    ),
+                ],
+            )
+            # Merge load-time warnings — they must not be silently dropped
+            assessment.warnings.extend(
+                SafeWarning(category="load", message=w) for w in warnings
+            )
+            if warnings:
+                assessment.status = AssessmentStatus.INCOMPLETE
+            # Attempt publication with the incomplete assessment
+            key = fingerprint(assessment, pull_request["head"]["sha"])
+            try:
+                client.publish(render_comment(assessment, invariants, key), key)
+            except RuntimeError:
+                assessment.warnings.append(
+                    SafeWarning(
+                        category="publication",
+                        message="Could not publish Guardian comment.",
+                    )
+                )
+            _write_action_outputs(assessment)
+            print(json.dumps(assessment.model_dump(mode="json")))
+            return 0
 
         # --- wire the judge when credentials are available ------------------
         api_key = os.environ.get("INPUT_LLM-API-KEY") or os.environ.get("LLM_API_KEY")
@@ -123,7 +185,20 @@ def run() -> int:
 
         # --- publish ---------------------------------------------------------
         key = fingerprint(assessment, pull_request["head"]["sha"])
-        client.publish(render_comment(assessment, invariants, key), key)
+        try:
+            client.publish(render_comment(assessment, invariants, key), key)
+        except RuntimeError:
+            # Publication failure does not invalidate the assessment.
+            # Record the failure and ensure the status remains incomplete.
+            # Warning uses constant sanitised text — never f'{exc}'.
+            assessment.warnings.append(
+                SafeWarning(
+                    category="publication",
+                    message="Could not publish Guardian comment.",
+                )
+            )
+            if assessment.status == AssessmentStatus.NO_CONFIRMED_VIOLATIONS:
+                assessment.status = AssessmentStatus.INCOMPLETE
         _write_action_outputs(assessment)
         print(json.dumps(assessment.model_dump(mode="json")))
     return 0

@@ -45,13 +45,19 @@ jobs:
   assess:
     runs-on: ubuntu-latest
     steps:
-      - uses: your-org/invariant-guardian@v0
+      # actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: shahibag/architecture-invariant-guardian@v0.2.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           llm-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
           llm-base-url: https://api.deepseek.com
           model: deepseek-v4-flash
 ```
+
+> **Note:** `shahibag/architecture-invariant-guardian@v0.2.0` is an immutable
+> point-release reference that becomes available only after the v0.2.0 release
+> is published.  Until then, use a branch or commit SHA.
 
 Fork pull requests do not use the provider key and do not publish a comment.
 
