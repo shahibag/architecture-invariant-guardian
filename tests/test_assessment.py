@@ -3,7 +3,6 @@ from pathlib import Path
 from invariant_guardian.application import assess_diff
 from invariant_guardian.domain.models import AssessmentStatus
 
-
 FIXTURES = Path(__file__).parent / "fixtures"
 
 

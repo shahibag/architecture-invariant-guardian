@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re as _re
 from enum import StrEnum
+from fnmatch import translate as _fnmatch_translate
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 
 class Severity(StrEnum):
@@ -20,6 +23,36 @@ class AssessmentStatus(StrEnum):
 class InvariantScope(BaseModel):
     languages: list[str] = Field(min_length=1)
     include_paths: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_include_paths(self) -> InvariantScope:
+        for p in self.include_paths:
+            # --- structural checks before fnmatch.translate masks issues ---
+            if not p:
+                raise ValueError(f"invalid scope include_path {p!r}: empty pattern")
+            if "\x00" in p:
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: null byte"
+                )
+            if _re.match(r"^(/[^/]+|[A-Za-z]:[/\\])", p):
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: absolute path"
+                )
+            if _re.search(r"(?:^|[/\\])\.\.[/\\]", p):
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: path traversal"
+                )
+            if _re.search(r"\[[^]]*$", p):
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: unbalanced bracket"
+                )
+            try:
+                _re.compile(_fnmatch_translate(p))
+            except _re.error as exc:
+                raise ValueError(
+                    f"invalid scope include_path {p!r}: {exc}"
+                ) from exc
+        return self
 
 
 class Invariant(BaseModel):
@@ -48,8 +81,125 @@ class Violation(CandidateFinding):
     suggested_direction: str
 
 
+# ---------------------------------------------------------------------------
+# v0.2 new models
+# ---------------------------------------------------------------------------
+
+class ChangedFile(BaseModel):
+    """A single file from a pull-request diff listing."""
+
+    path: str
+    status: Literal["added", "modified", "removed", "renamed"]
+    patch: str | None = None
+    patch_complete: bool = True
+
+
+class CoverageGap(BaseModel):
+    """Why a changed file could not be evaluated."""
+
+    file: str
+    reason: str
+
+
+class Coverage(BaseModel):
+    """Which in-scope files were evaluated and which were skipped."""
+
+    evaluated_files: list[str] = Field(default_factory=list)
+    skipped_files: list[CoverageGap] = Field(default_factory=list)
+    context_truncated: bool = False
+
+
+class ProviderUsage(BaseModel):
+    """Token-usage metadata reported by the model provider."""
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    model: str
+    prompt_version: str
+
+
+class SafeWarning(BaseModel):
+    """A sanitised, user-facing warning — never a raw exception."""
+
+    category: str
+    message: str = Field(min_length=1)
+
+
+class ReviewRequest(BaseModel):
+    """The unified input to ReviewEngine.assess."""
+
+    base_sha: str
+    head_sha: str
+    invariants: list[Invariant] = Field(default_factory=list)
+    changed_files: list[ChangedFile] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# v0.2 bounded judge contract — no unbounded diff reaches the provider
+# ---------------------------------------------------------------------------
+
+
+class JudgeCandidate(BaseModel):
+    """A single candidate finding packaged for provider judgment.
+
+    Only the bounded *context_hunk* (not the full diff) reaches the provider.
+    """
+
+    index: int = Field(ge=0)
+    invariant_id: str
+    invariant_text: str = Field(min_length=1)
+    file: str
+    start_line: int
+    end_line: int
+    evidence: str = Field(min_length=1)
+    context_hunk: str = Field(min_length=1)
+
+
+class JudgeDecision(BaseModel):
+    """Provider judgment on a single candidate."""
+
+    candidate_index: int = Field(ge=0)
+    decision: Literal["confirm", "reject"]
+    why_it_matters: str = Field(max_length=600)
+    suggested_direction: str = Field(max_length=600)
+
+
+class JudgeRequest(BaseModel):
+    """Bounded provider request — never carries an unbounded full diff."""
+
+    candidates: list[JudgeCandidate] = Field(default_factory=list)
+
+
+class JudgeResult(BaseModel):
+    """Provider judgment result with usage metadata."""
+
+    decisions: list[JudgeDecision] = Field(default_factory=list)
+    provider_usage: ProviderUsage | None = None
+    truncated: bool = False
+    errors: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Warning coercion helper — allows old str warnings alongside new SafeWarning
+# ---------------------------------------------------------------------------
+
+def _coerce_warning(v: Any) -> SafeWarning | str:
+    """Wrap bare strings so old call sites keep working."""
+    if isinstance(v, str):
+        return SafeWarning(category="general", message=v)
+    return v
+
+
+# ---------------------------------------------------------------------------
+# Updated Assessment — coverage is mandatory
+# ---------------------------------------------------------------------------
+
 class Assessment(BaseModel):
     status: AssessmentStatus
     candidates: list[CandidateFinding] = Field(default_factory=list)
     violations: list[Violation] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
+    coverage: Coverage
+    provider_usage: ProviderUsage | None = None
+    warnings: list[Annotated[SafeWarning, BeforeValidator(_coerce_warning)]] = Field(
+        default_factory=list
+    )

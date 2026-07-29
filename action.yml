@@ -22,6 +22,16 @@ inputs:
     required: false
     default: .guardian/invariants
 
+outputs:
+  assessment-status:
+    description: One of no_confirmed_violations, confirmed_violations, or assessment_incomplete.
+  confirmed-count:
+    description: Number of confirmed architectural violations (non-negative integer).
+  candidate-count:
+    description: Number of candidate findings evaluated (non-negative integer).
+  coverage-complete:
+    description: Whether all in-scope changed files were fully evaluated (true or false).
+
 runs:
   using: docker
   image: Dockerfile
