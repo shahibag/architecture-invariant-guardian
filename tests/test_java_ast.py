@@ -1422,7 +1422,7 @@ class TestClassifyTypeSuffixHeuristic:
         for suffix in ("OrderEntity", "OrderPersistenceModel", "OrderAggregate"):
             source = template.format(suffix=suffix)
             candidates = detect_domain_leak_candidates(
-                source, f"src/Controller.java", {5},
+                source, "src/Controller.java", {5},
             )
             assert len(candidates) >= 1, (
                 f"Suffix {suffix} not detected by _classify_type heuristic: "
