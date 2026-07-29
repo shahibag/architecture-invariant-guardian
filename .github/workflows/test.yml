@@ -49,3 +49,86 @@ jobs:
           python -c "import json; d=json.load(open('/tmp/guardian-monitoring.json')); assert d['status'] == 'candidates_require_judgment'; assert any(c['invariant_id'] == 'no-temporary-monitoring' for c in d['candidates']); assert not d['coverage']['context_truncated']; print('PASS: temporary-monitoring fixture')"
       - name: Run Action-runner integration tests
         run: python -m pytest tests/test_integration.py -o addopts='' -v
+      - name: Docker Action input/output env contract
+        env:
+          INPUT_GITHUB-TOKEN: ${{ github.token }}
+          INPUT_INVARIANT-PATH: tests/fixtures/invariants
+          INPUT_MODEL: deepseek-v4-flash
+          INPUT_LLM-BASE-URL: https://api.deepseek.com
+        run: |
+          # Prove the Docker Action metadata contract: hyphenated INPUT_* names
+          # reach the image and all declared outputs are written.
+          cat > /tmp/fork-event.json <<'EOF'
+          {
+            "repository": {"full_name": "owner/repo"},
+            "number": 1,
+            "pull_request": {
+              "base": {"sha": "base"},
+              "head": {"sha": "head", "repo": {"fork": true}}
+            }
+          }
+          EOF
+          OUT=/tmp/guardian-outputs
+          : > "$OUT"
+          docker run --rm \
+            -e GITHUB_EVENT_PATH=/event.json \
+            -e GITHUB_OUTPUT=/github-output \
+            -e GITHUB_ACTIONS=true \
+            -e INPUT_GITHUB-TOKEN \
+            -e INPUT_INVARIANT-PATH \
+            -e INPUT_MODEL \
+            -e INPUT_LLM-BASE-URL \
+            -v /tmp/fork-event.json:/event.json:ro \
+            -v "$OUT":/github-output \
+            invariant-guardian:ci-test run-action
+          echo "--- GITHUB_OUTPUT ---"
+          cat "$OUT"
+          grep -q '^assessment-status=assessment_incomplete$' "$OUT"
+          grep -q '^confirmed-count=0$' "$OUT"
+          grep -q '^candidate-count=0$' "$OUT"
+          grep -q '^coverage-complete=false$' "$OUT"
+          # Secrets/tokens must never appear in the output file.
+          if grep -F "${{ github.token }}" "$OUT"; then
+            echo "token leaked into GITHUB_OUTPUT" >&2
+            exit 1
+          fi
+          echo "PASS: Docker Action INPUT_/GITHUB_OUTPUT contract"
+
+  action-contract:
+    # Real uses: ./ path — only meaningful on pull_request events where the
+    # Actions runner injects the PR payload and INPUT_* metadata.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # actions/checkout@v4 — immutable SHA
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Invoke local Docker Action via uses
+        id: guardian
+        uses: ./
+        with:
+          github-token: ${{ github.token }}
+          invariant-path: tests/fixtures/invariants
+      - name: Verify declared Action outputs
+        run: |
+          status='${{ steps.guardian.outputs.assessment-status }}'
+          confirmed='${{ steps.guardian.outputs.confirmed-count }}'
+          candidates='${{ steps.guardian.outputs.candidate-count }}'
+          coverage='${{ steps.guardian.outputs.coverage-complete }}'
+          echo "assessment-status=$status"
+          echo "confirmed-count=$confirmed"
+          echo "candidate-count=$candidates"
+          echo "coverage-complete=$coverage"
+          case "$status" in
+            no_confirmed_violations|confirmed_violations|assessment_incomplete) ;;
+            *) echo "unexpected assessment-status: $status" >&2; exit 1 ;;
+          esac
+          [[ "$confirmed" =~ ^[0-9]+$ ]] || { echo "bad confirmed-count" >&2; exit 1; }
+          [[ "$candidates" =~ ^[0-9]+$ ]] || { echo "bad candidate-count" >&2; exit 1; }
+          case "$coverage" in
+            true|false) ;;
+            *) echo "bad coverage-complete: $coverage" >&2; exit 1 ;;
+          esac
+          echo "PASS: uses: ./ Action outputs verified"
