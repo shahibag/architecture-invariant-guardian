@@ -1,0 +1,10 @@
+--- a/src/main/java/com/example/SafeController.java
++++ b/src/main/java/com/example/SafeController.java
+@@ -1,7 +1,7 @@
+ import org.springframework.web.bind.annotation.*;
+ @RestController
+ class SafeController {
+     String fake = "@Entity class Hack {}";
+     @GetMapping("/safe")
+     public String safe() { return "@RestController public OrderEntity get() {}"; }
++}

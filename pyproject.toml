@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "invariant-guardian-action"
-version = "0.1.0"
+version = "0.2.0"
 description = "Repository-owned architecture invariant checks for pull requests."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,10 +12,17 @@ dependencies = [
   "openai>=1.0,<3",
   "pydantic>=2.11,<3",
   "PyYAML>=6.0,<7",
+  "tree-sitter==0.26.0",
+  "tree-sitter-java==0.23.5",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3,<9"]
+dev = [
+  "mypy>=1.17,<2",
+  "pytest>=8.3,<9",
+  "ruff>=0.12,<1",
+  "types-PyYAML>=6.0,<7",
+]
 
 [project.scripts]
 invariant-guardian = "invariant_guardian.cli:main"

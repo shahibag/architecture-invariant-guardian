@@ -1,0 +1,9 @@
+--- a/src/main/java/com/example/OrderController.java
++++ b/src/main/java/com/example/OrderController.java
+@@ -1,6 +1,6 @@
+ import org.springframework.web.bind.annotation.*;
+ @RestController
+ class OrderController {
+     @GetMapping("/orders")
++    public OrderDTO getOrder() { return null; }
+ }

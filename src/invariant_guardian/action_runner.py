@@ -1,3 +1,5 @@
+"""GitHub Action runner — event translation, judgement, publication, outputs."""
+
 from __future__ import annotations
 
 import json
@@ -7,10 +9,37 @@ from tempfile import TemporaryDirectory
 
 from invariant_guardian.adapters.github.client import GitHubClient
 from invariant_guardian.adapters.openai.judge import OpenAICompatibleJudge
-from invariant_guardian.application import assess_diff
-from invariant_guardian.domain.models import Assessment, AssessmentStatus
+from invariant_guardian.application import ReviewEngine
+from invariant_guardian.domain.models import (
+    Assessment,
+    AssessmentStatus,
+    Coverage,
+    ReviewRequest,
+    SafeWarning,
+)
 from invariant_guardian.invariants import load_invariants
 from invariant_guardian.rendering.comment import fingerprint, render_comment
+
+
+def _write_action_outputs(assessment: Assessment) -> None:
+    """Write the v0.2 Action outputs to GITHUB_OUTPUT (spec §10)."""
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if not output_path:
+        return  # not running inside an Action — graceful no-op
+
+    confirmed_count = len(assessment.violations)
+    candidate_count = len(assessment.candidates)
+    coverage_complete = (
+        "false"
+        if (assessment.coverage.skipped_files or assessment.coverage.context_truncated)
+        else "true"
+    )
+
+    with open(output_path, "a", encoding="utf-8") as f:
+        f.write(f"assessment-status={assessment.status.value}\n")
+        f.write(f"confirmed-count={confirmed_count}\n")
+        f.write(f"candidate-count={candidate_count}\n")
+        f.write(f"coverage-complete={coverage_complete}\n")
 
 
 def run() -> int:
@@ -22,55 +51,154 @@ def run() -> int:
     pull_request = event.get("pull_request")
     if not pull_request:
         raise RuntimeError("Invariant Guardian supports pull_request events only")
+
+    # --- fork PR: assessment_incomplete with all declared outputs -----------
     if pull_request["head"]["repo"].get("fork"):
-        print(json.dumps({"status": "assessment_incomplete", "reason": "fork PR"}))
+        assessment = Assessment(
+            status=AssessmentStatus.INCOMPLETE,
+            coverage=Coverage(context_truncated=True),
+            warnings=[
+                SafeWarning(
+                    category="fork",
+                    message="Fork PRs are not assessed for architecture invariants.",
+                ),
+            ],
+        )
+        _write_action_outputs(assessment)
+        print(json.dumps(assessment.model_dump(mode="json")))
         return 0
 
     client = GitHubClient(token, event["repository"]["full_name"], event["number"])
     with TemporaryDirectory(prefix="invariant-guardian-") as temp:
+        # --- load invariants ------------------------------------------------
         invariant_dir = Path(temp) / "invariants"
-        client.write_invariants(
-            invariant_dir,
-            pull_request["base"]["sha"],
-            os.environ.get("INPUT_INVARIANT-PATH", ".guardian/invariants"),
-        )
-        invariants, warnings = load_invariants(invariant_dir)
-        diff = client.pull_diff()
-        assessment = assess_diff(invariant_dir, diff)
-        assessment.warnings.extend(warnings)
-        api_key = os.environ.get("INPUT_LLM-API-KEY") or os.environ.get("LLM_API_KEY")
-        if assessment.candidates and api_key:
-            try:
-                assessment = OpenAICompatibleJudge(
-                    api_key=api_key,
-                    model=(
-                        os.environ.get("INPUT_MODEL")
-                        or os.environ.get("LLM_MODEL")
-                        or "deepseek-v4-flash"
-                    ),
-                    base_url=(
-                        os.environ.get("INPUT_LLM-BASE-URL")
-                        or os.environ.get("LLM_BASE_URL")
-                        or "https://api.deepseek.com"
-                    ),
-                ).confirm(invariants, assessment.candidates, diff)
-            except Exception as exc:
-                assessment = Assessment(
-                    status=AssessmentStatus.INCOMPLETE,
-                    warnings=[
-                        *assessment.warnings,
-                        f"AI evidence judgment failed: {exc}",
-                    ],
-                )
-        elif assessment.candidates:
+        # P1.3: catch all expected adapter failures at the outer Action boundary
+        invariants_unavailable = False
+        try:
+            client.write_invariants(
+                invariant_dir,
+                pull_request["base"]["sha"],
+                os.environ.get("INPUT_INVARIANT-PATH", ".guardian/invariants"),
+            )
+            invariants, warnings = load_invariants(invariant_dir)
+        except (RuntimeError, TypeError, OSError):
+            # Sanitised adapter / filesystem failure — never leak raw error
+            invariants = []
+            warnings = []
+            invariants_unavailable = True
+
+        # --- invariants unavailable → safe incomplete output ------------------
+        if invariants_unavailable:
             assessment = Assessment(
                 status=AssessmentStatus.INCOMPLETE,
+                coverage=Coverage(context_truncated=True),
                 warnings=[
-                    *assessment.warnings,
-                    "AI evidence judgment skipped because no compatible-provider API key was available.",
+                    SafeWarning(
+                        category="invariants",
+                        message="Invariant loading failed — invariants are unavailable.",
+                    ),
                 ],
             )
+            _write_action_outputs(assessment)
+            print(json.dumps(assessment.model_dump(mode="json")))
+            return 0
+
+        # --- fetch changed files via SourceReader (GitHub files endpoint) ---
+        try:
+            changed_files = client.changed_files()
+            files_uncertain = False
+        except RuntimeError:
+            changed_files = []
+            files_uncertain = True
+
+        # --- build request & assess via engine ------------------------------
+        engine = ReviewEngine()
+        request = ReviewRequest(
+            base_sha=pull_request["base"]["sha"],
+            head_sha=pull_request["head"]["sha"],
+            invariants=invariants,
+            changed_files=changed_files,
+        )
+
+        if files_uncertain:
+            # Changed-file listing was incomplete — skip assessment entirely
+            assessment = Assessment(
+                status=AssessmentStatus.INCOMPLETE,
+                coverage=Coverage(context_truncated=True),
+                warnings=[
+                    SafeWarning(
+                        category="changed-files",
+                        message="Changed file listing is incomplete or unavailable.",
+                    ),
+                ],
+            )
+            # Merge load-time warnings — they must not be silently dropped
+            assessment.warnings.extend(
+                SafeWarning(category="load", message=w) for w in warnings
+            )
+            if warnings:
+                assessment.status = AssessmentStatus.INCOMPLETE
+            # Attempt publication with the incomplete assessment
+            key = fingerprint(assessment, pull_request["head"]["sha"])
+            try:
+                client.publish(render_comment(assessment, invariants, key), key)
+            except RuntimeError:
+                assessment.warnings.append(
+                    SafeWarning(
+                        category="publication",
+                        message="Could not publish Guardian comment.",
+                    )
+                )
+            _write_action_outputs(assessment)
+            print(json.dumps(assessment.model_dump(mode="json")))
+            return 0
+
+        # --- wire the judge when credentials are available ------------------
+        api_key = os.environ.get("INPUT_LLM-API-KEY") or os.environ.get("LLM_API_KEY")
+        judge = None
+        if api_key:
+            judge = OpenAICompatibleJudge(
+                api_key=api_key,
+                model=(
+                    os.environ.get("INPUT_MODEL")
+                    or os.environ.get("LLM_MODEL")
+                    or "deepseek-v4-flash"
+                ),
+                base_url=(
+                    os.environ.get("INPUT_LLM-BASE-URL")
+                    or os.environ.get("LLM_BASE_URL")
+                    or "https://api.deepseek.com"
+                ),
+            )
+
+        assessment = engine.assess(request, judge=judge, source_reader=client)
+
+        # --- merge load-time warnings ---------------------------------------
+        assessment.warnings.extend(
+            SafeWarning(category="load", message=w) for w in warnings
+        )
+        if warnings:
+            # A malformed repository-owned invariant means the requested
+            # policy set was not fully evaluated.
+            assessment.status = AssessmentStatus.INCOMPLETE
+            assessment.coverage.context_truncated = True
+
+        # --- publish ---------------------------------------------------------
         key = fingerprint(assessment, pull_request["head"]["sha"])
-        client.publish(render_comment(assessment, invariants, key), key)
+        try:
+            client.publish(render_comment(assessment, invariants, key), key)
+        except RuntimeError:
+            # Publication failure does not invalidate the assessment.
+            # Record the failure and ensure the status remains incomplete.
+            # Warning uses constant sanitised text — never f'{exc}'.
+            assessment.warnings.append(
+                SafeWarning(
+                    category="publication",
+                    message="Could not publish Guardian comment.",
+                )
+            )
+            if assessment.status == AssessmentStatus.NO_CONFIRMED_VIOLATIONS:
+                assessment.status = AssessmentStatus.INCOMPLETE
+        _write_action_outputs(assessment)
         print(json.dumps(assessment.model_dump(mode="json")))
     return 0

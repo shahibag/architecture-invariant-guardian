@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import yaml
 
 from invariant_guardian.domain.models import Invariant
-
 
 REQUIRED_SECTIONS = {
     "Rule": "rule",
@@ -23,7 +22,7 @@ def load_invariants(directory: Path) -> tuple[list[Invariant], list[str]]:
     for path in sorted(directory.glob("*.md")):
         try:
             invariants.append(_parse_invariant(path))
-        except (ValueError, yaml.YAMLError) as error:
+        except (TypeError, ValueError, yaml.YAMLError) as error:
             warnings.append(f"{path.name}: {error}")
     return invariants, warnings
 
@@ -35,14 +34,16 @@ def _parse_invariant(path: Path) -> Invariant:
         raise ValueError("missing YAML front matter")
     metadata = yaml.safe_load(match.group(1))
     if not isinstance(metadata, dict):
-        raise ValueError("front matter must be a mapping")
+        raise TypeError("front matter must be a mapping")
     sections = _sections(match.group(2))
     missing = [title for title in REQUIRED_SECTIONS if title not in sections]
     if missing:
         raise ValueError(f"missing required section(s): {', '.join(missing)}")
-    return Invariant(
-        **metadata,
-        **{field: sections[title] for title, field in REQUIRED_SECTIONS.items()},
+    return Invariant.model_validate(
+        {
+            **metadata,
+            **{field: sections[title] for title, field in REQUIRED_SECTIONS.items()},
+        }
     )
 
 

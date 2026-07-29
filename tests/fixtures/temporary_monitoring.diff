@@ -2,10 +2,12 @@ diff --git a/src/main/java/com/example/OrderService.java b/src/main/java/com/exa
 index 1111111..2222222 100644
 --- a/src/main/java/com/example/OrderService.java
 +++ b/src/main/java/com/example/OrderService.java
-@@ -10,3 +10,9 @@ class OrderService {
+@@ -1,0 +2,7 @@
++import org.springframework.scheduling.annotation.Scheduled;
++
++class OrderService {
 +    @Scheduled(fixedDelay = 5000)
 +    public void retryUnprocessedOrders() {
 +        orderRepository.save(order);
 +    }
- }
-
++}

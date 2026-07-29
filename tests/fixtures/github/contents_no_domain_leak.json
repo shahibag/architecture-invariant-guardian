@@ -1,0 +1,18 @@
+{
+  "name": "no-domain-leak.md",
+  "path": "tests/fixtures/invariants/no-domain-leak.md",
+  "sha": "528302f6a637cefd1eda191f208a8e6eda0195c6",
+  "size": 496,
+  "url": "https://api.github.com/repos/shahibag/architecture-invariant-guardian/contents/tests/fixtures/invariants/no-domain-leak.md?ref=b003ae477cde226021d52e0c79b6018f395c54c6",
+  "html_url": "https://github.com/shahibag/architecture-invariant-guardian/blob/b003ae477cde226021d52e0c79b6018f395c54c6/tests/fixtures/invariants/no-domain-leak.md",
+  "git_url": "https://api.github.com/repos/shahibag/architecture-invariant-guardian/git/blobs/528302f6a637cefd1eda191f208a8e6eda0195c6",
+  "download_url": "https://raw.githubusercontent.com/shahibag/architecture-invariant-guardian/b003ae477cde226021d52e0c79b6018f395c54c6/tests/fixtures/invariants/no-domain-leak.md",
+  "type": "file",
+  "content": "LS0tCmlkOiBuby1kb21haW4tbGVhawp0aXRsZTogTm8gaW50ZXJuYWwgZG9t\nYWluIG9yIHBlcnNpc3RlbmNlIGxlYWthZ2UKc2V2ZXJpdHk6IGVycm9yCnNj\nb3BlOgogIGxhbmd1YWdlczogW2phdmFdCiAgaW5jbHVkZV9wYXRoczogWyJz\ncmMvbWFpbi9qYXZhLyoqIl0KLS0tCgojIyBSdWxlCgpQdWJsaWMgYm91bmRh\ncmllcyBtdXN0IG5vdCBleHBvc2UgcGVyc2lzdGVuY2UgZW50aXRpZXMgb3Ig\naW50ZXJuYWwgYWdncmVnYXRlcy4KCiMjIFJhdGlvbmFsZQoKTGVha2luZyBp\nbXBsZW1lbnRhdGlvbiB0eXBlcyBtYWtlcyBjYWxsZXJzIGRlcGVuZCBvbiBp\nbnRlcm5hbCBzdHJ1Y3R1cmUuCgojIyBWaW9sYXRpbmcgZXhhbXBsZXMKCkEg\ncHVibGljIGNvbnRyb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlckVu\ndGl0eS4KCiMjIEFjY2VwdGFibGUgZXhhbXBsZXMKCkEgcHVibGljIGNvbnRy\nb2xsZXIgbWV0aG9kIHJldHVybmluZyBhbiBPcmRlclJlc3BvbnNlIERUTy4K\nCg==\n",
+  "encoding": "base64",
+  "_links": {
+    "self": "https://api.github.com/repos/shahibag/architecture-invariant-guardian/contents/tests/fixtures/invariants/no-domain-leak.md?ref=b003ae477cde226021d52e0c79b6018f395c54c6",
+    "git": "https://api.github.com/repos/shahibag/architecture-invariant-guardian/git/blobs/528302f6a637cefd1eda191f208a8e6eda0195c6",
+    "html": "https://github.com/shahibag/architecture-invariant-guardian/blob/b003ae477cde226021d52e0c79b6018f395c54c6/tests/fixtures/invariants/no-domain-leak.md"
+  }
+}

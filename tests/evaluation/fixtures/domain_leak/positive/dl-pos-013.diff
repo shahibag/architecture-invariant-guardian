@@ -1,0 +1,12 @@
+--- a/src/main/java/com/example/PaymentController.java
++++ b/src/main/java/com/example/PaymentApiController.java
+@@ -1,9 +1,9 @@
+ import jakarta.persistence.Entity;
+ import org.springframework.web.bind.annotation.*;
+ @Entity
+ class PaymentEntity {}
+ @RestController
+ class PaymentController {
+     @GetMapping("/payments")
++    public PaymentEntity getPayment() { return null; }
+ }

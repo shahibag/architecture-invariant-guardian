@@ -1,0 +1,46 @@
+{
+  "candidate_detection": {
+    "no-domain-leak": {
+      "total": 28,
+      "true_positives": 14,
+      "false_positives": 0,
+      "true_negatives": 14,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "no-temporary-monitoring": {
+      "total": 25,
+      "true_positives": 13,
+      "false_positives": 0,
+      "true_negatives": 12,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    }
+  },
+  "final_decision": {
+    "no-domain-leak": {
+      "total": 28,
+      "true_positives": 13,
+      "false_positives": 0,
+      "true_negatives": 15,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "no-temporary-monitoring": {
+      "total": 25,
+      "true_positives": 12,
+      "false_positives": 0,
+      "true_negatives": 13,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    }
+  },
+  "assessment_incomplete": {
+    "no-domain-leak": 1,
+    "no-temporary-monitoring": 0
+  }
+}
