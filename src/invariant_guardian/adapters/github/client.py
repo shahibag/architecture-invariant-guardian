@@ -320,10 +320,9 @@ class GitHubClient:
                     continue
                 patch = entry.get("patch")
                 patch_str = patch if isinstance(patch, str) else None
-                # Missing patch on added/modified/renamed → uncertainty
-                # Removed files may omit patch; non-string patch is unavailable
-                if patch_str is None and status != "removed":
-                    uncertain = True
+                # GitHub omits patch for binary, empty, or oversize diffs.
+                # That is a per-file coverage gap, not a listing failure.
+                # Removed files may omit patch entirely.
                 patch_complete = not (
                     patch_str is None and status != "removed"
                 )
@@ -797,13 +796,19 @@ class GitHubClient:
         """Phase 3 fail-closed: validate a pagination ``Link rel=next`` URL.
 
         The URL must satisfy all :meth:`_validate_url` constraints AND its
-        path must equal *expected_path_prefix* exactly — never a startswith
-        check that would accept sibling suffixes (``filesevil``,
-        ``comments-other``).  Encoded slashes (``%2F``), dot segments
-        (``/../``, ``/./``), and ``;params`` in the path are all rejected.
+        path must identify the same resource as *expected_path_prefix*.
 
-        The query string may vary — only the path is validated for
-        structural equality.
+        GitHub may return either:
+
+        - ``/repos/{owner}/{repo}/...`` (canonical form used by this client), or
+        - ``/repositories/{numeric_id}/...`` (common in Link headers).
+
+        Both are accepted when the resource suffix matches exactly
+        (for example ``pulls/4/files`` or ``issues/4/comments``). Sibling
+        suffixes (``filesevil``, ``comments-other``), encoded slashes,
+        dot segments, and ``;params`` remain rejected.
+
+        The query string may vary — only the path is validated.
 
         Raises :class:`RuntimeError` (sanitised) on any violation.
         """
@@ -815,35 +820,41 @@ class GitHubClient:
                 "Pagination next-URL resource does not match expected endpoint"
             ) from exc
 
-        # Phase 3 P1#1: exact structural path equality — never startswith
-        if parsed.path != expected_path_prefix:
+        path = parsed.path or ""
+        # Reject encoded slashes and dot segments in the raw path string.
+        lowered = path.lower()
+        if "%2f" in lowered or "/../" in path or "/./" in path or path.endswith(("/..", "/.")):
             raise RuntimeError(
                 "Pagination next-URL resource does not match expected endpoint"
             )
-
-        # Reject encoded-slash path transformations
-        if "%2f" in parsed.path.lower():
-            raise RuntimeError(
-                "Pagination next-URL resource does not match expected endpoint"
-            )
-
-        # Reject dot segments
-        if (
-            "/../" in parsed.path
-            or "/./" in parsed.path
-            or parsed.path.endswith("/..")
-            or parsed.path.endswith("/.")
-            or parsed.path in ("/..", "/.")
-        ):
-            raise RuntimeError(
-                "Pagination next-URL resource does not match expected endpoint"
-            )
-
         # Reject ;params in the URL path component
         if parsed.params:
             raise RuntimeError(
                 "Pagination next-URL resource does not match expected endpoint"
             )
+
+        if path == expected_path_prefix:
+            return
+
+        # Accept GitHub's repository-id pagination form when the resource
+        # suffix matches the expected /repos/{owner}/{repo}/{resource} path.
+        expected_parts = [part for part in expected_path_prefix.split("/") if part]
+        actual_parts = [part for part in path.split("/") if part]
+        # expected: repos / owner / repo / resource...
+        if (
+            len(expected_parts) >= 4
+            and expected_parts[0] == "repos"
+            and len(actual_parts) >= 3
+            and actual_parts[0] == "repositories"
+            and actual_parts[1].isdigit()
+            and actual_parts[2:] == expected_parts[3:]
+        ):
+            return
+
+        raise RuntimeError(
+            "Pagination next-URL resource does not match expected endpoint"
+        )
+
 
     @staticmethod
     def _parse_link_header(link: str) -> str:

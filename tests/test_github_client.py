@@ -3551,3 +3551,105 @@ class TestContentsBase64Decoding:
         written = (dest / "no-domain-leak.md").read_text(encoding="utf-8")
         assert "id: no-domain-leak" in written
         assert "## Rule" in written
+
+
+class TestRepositoriesIdPaginationUrl:
+    """GitHub Link headers often use /repositories/{id}/... instead of
+    /repos/{owner}/{repo}/... — both must be accepted for the same resource.
+    """
+
+    def test_repositories_id_files_next_url_accepted(self) -> None:
+        url = (
+            "https://api.github.com/repositories/1312445612/"
+            "pulls/4/files?per_page=100&page=2"
+        )
+        GitHubClient._validate_next_url(
+            url, "/repos/shahibag/architecture-invariant-guardian/pulls/4/files"
+        )
+
+    def test_repositories_id_comments_next_url_accepted(self) -> None:
+        url = (
+            "https://api.github.com/repositories/1312445612/"
+            "issues/4/comments?per_page=100&page=2"
+        )
+        GitHubClient._validate_next_url(
+            url, "/repos/shahibag/architecture-invariant-guardian/issues/4/comments"
+        )
+
+    def test_repositories_id_wrong_resource_rejected(self) -> None:
+        url = (
+            "https://api.github.com/repositories/1312445612/"
+            "pulls/4/filesevil?per_page=100&page=2"
+        )
+        with pytest.raises(RuntimeError, match="Pagination next-URL"):
+            GitHubClient._validate_next_url(
+                url, "/repos/shahibag/architecture-invariant-guardian/pulls/4/files"
+            )
+
+    def test_changed_files_follows_repositories_id_pagination(self) -> None:
+        client = GitHubClient("token", "owner/repo", 4)
+        pages = {
+            1: (
+                [
+                    {
+                        "filename": f"src/main/java/com/example/F{i}.java",
+                        "status": "modified",
+                        "patch": "@@ -1 +1 @@\n-a\n+b\n",
+                    }
+                    for i in range(100)
+                ],
+                "https://api.github.com/repositories/99/pulls/4/files?per_page=100&page=2",
+            ),
+            2: (
+                [
+                    {
+                        "filename": "src/main/java/com/example/Last.java",
+                        "status": "modified",
+                        "patch": "@@ -1 +1 @@\n-a\n+b\n",
+                    }
+                ],
+                "",
+            ),
+        }
+        calls = {"n": 0}
+
+        def fake_json_with_link(url: str, method: str = "GET", payload=None):
+            calls["n"] += 1
+            if "page=2" in url:
+                return pages[2]
+            return pages[1]
+
+        client._json_with_link = fake_json_with_link  # type: ignore[method-assign]
+        result = client.changed_files()
+        assert len(result) == 101
+        assert calls["n"] == 2
+
+
+class TestMissingPatchDoesNotFailListing:
+    def test_added_file_without_patch_is_returned_incomplete(self) -> None:
+        client = GitHubClient("token", "owner/repo", 1)
+
+        def fake_json_with_link(url: str, method: str = "GET", payload=None):
+            return (
+                [
+                    {
+                        "filename": "src/main/java/com/example/A.java",
+                        "status": "added",
+                        # no patch — GitHub omits for empty/large files
+                    },
+                    {
+                        "filename": "src/main/java/com/example/B.java",
+                        "status": "modified",
+                        "patch": "@@ -1 +1 @@\n-a\n+b\n",
+                    },
+                ],
+                "",
+            )
+
+        client._json_with_link = fake_json_with_link  # type: ignore[method-assign]
+        result = client.changed_files()
+        assert len(result) == 2
+        by_path = {f.path: f for f in result}
+        assert by_path["src/main/java/com/example/A.java"].patch_complete is False
+        assert by_path["src/main/java/com/example/A.java"].patch is None
+        assert by_path["src/main/java/com/example/B.java"].patch_complete is True
