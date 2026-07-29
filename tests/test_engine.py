@@ -2177,8 +2177,10 @@ class TestTypeResolutionBoundaries:
         )
 
     def test_over_20_source_roots_is_incomplete(self) -> None:
-        """Source reader with >20 roots → index unavailable → resolve
-        returns None → incomplete."""
+        """Over-budget root indexes skip extra roots only. Cross-module
+        types that need those extras remain unresolved → incomplete.
+        Primary-root resolution stays available separately.
+        """
         source = (
             "package com.example;\n"
             "import org.springframework.web.bind.annotation.*;\n"
@@ -2722,9 +2724,9 @@ class TestRootIndexBehavior:
             f"Ambiguous resolution must return None, got: {result!r}"
         )
 
-    def test_missing_roots_from_list_source_roots_marks_unavailable(self) -> None:
-        """list_source_roots returns None → index unavailable → _resolve
-        returns None."""
+    def test_missing_roots_from_list_source_roots_still_uses_primary(self) -> None:
+        """list_source_roots returns None → extra roots skipped, but missing
+        declarations under the primary root still resolve to None."""
         from invariant_guardian.application import _build_type_resolver
 
         source = "package com.example;\n@RestController class Api {}\n"
@@ -2745,11 +2747,11 @@ class TestRootIndexBehavior:
         assert resolver is not None
         result = resolver("Order")
         assert result is None, (
-            f"Missing root index must return None, got: {result!r}"
+            f"Missing declaration under primary root must return None, got: {result!r}"
         )
 
-    def test_over_20_roots_marks_unavailable(self) -> None:
-        """list_source_roots returns >20 roots → index unavailable → None."""
+    def test_over_20_roots_skips_extras_not_primary(self) -> None:
+        """list_source_roots >20 → extra roots ignored; unresolved type is None."""
         from invariant_guardian.application import _build_type_resolver
 
         source = "package com.example;\n@RestController class Api {}\n"
@@ -2770,5 +2772,273 @@ class TestRootIndexBehavior:
         assert resolver is not None
         result = resolver("Order")
         assert result is None, (
-            f"Over-budget roots must return None, got: {result!r}"
+            f"Unresolved type with over-budget extras must return None, got: {result!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unsupported / duplicate invariant capability validation
+# ---------------------------------------------------------------------------
+class _AcceptAllJudge:
+    """Judge that confirms every candidate — used only to prove capability gate
+    fires before detection/judgment can produce a false clean."""
+
+    def evaluate(self, request):  # type: ignore[no-untyped-def]
+        from invariant_guardian.domain.models import (
+            JudgeDecision,
+            JudgeResult,
+            ProviderUsage,
+        )
+
+        return JudgeResult(
+            decisions=[
+                JudgeDecision(
+                    candidate_index=i,
+                    decision="confirm",
+                    why_it_matters="x",
+                    suggested_direction="y",
+                )
+                for i in range(len(request.candidates))
+            ],
+            provider_usage=ProviderUsage(
+                input_tokens=1,
+                output_tokens=1,
+                model="test",
+                prompt_version="guardian-judge-v2",
+            ),
+        )
+
+
+def _java_changed_file(path: str = "src/main/java/com/example/Api.java") -> ChangedFile:
+    patch = (
+        f"diff --git a/{path} b/{path}\n"
+        f"--- a/{path}\n"
+        f"+++ b/{path}\n"
+        "@@ -0,0 +1,7 @@\n"
+        "+package com.example;\n"
+        "+import org.springframework.web.bind.annotation.*;\n"
+        "+@RestController\n"
+        "+class Api {\n"
+        '+    @GetMapping("/ok")\n'
+        '+    public String ok() { return "ok"; }\n'
+        "+}\n"
+    )
+    return ChangedFile(
+        path=path,
+        status="added",
+        patch=patch,
+        patch_complete=True,
+    )
+
+
+def _invariant(inv_id: str, title: str = "Custom") -> Invariant:
+    return Invariant(
+        id=inv_id,
+        title=title,
+        severity=Severity.ERROR,
+        scope=InvariantScope(languages=["java"], include_paths=["src/main/java/**"]),
+        rule="custom rule",
+        rationale="custom rationale",
+        violating_examples="bad",
+        acceptable_examples="good",
+    )
+
+
+class ExactSourceReader:
+    def __init__(self, path: str, source: str) -> None:
+        self._path = path
+        self._source = source
+
+    def changed_files(self) -> list[ChangedFile]:
+        return []
+
+    def read_file_at_ref(self, path: str, ref: str) -> bytes | None:
+        if path == self._path:
+            return self._source.encode("utf-8")
+        return None
+
+    def list_source_roots(self, ref: str) -> list[str] | None:
+        return ["src/main/java"]
+
+
+class TestUnsupportedAndDuplicateInvariants:
+    def test_unsupported_invariant_id_is_incomplete_not_clean(self) -> None:
+        path = "src/main/java/com/example/Api.java"
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/ok\")\n"
+            "    public String ok() { return \"ok\"; }\n"
+            "}\n"
+        )
+        request = ReviewRequest(
+            base_sha="base",
+            head_sha="head",
+            invariants=[_invariant("no-sql-injection")],
+            changed_files=[_java_changed_file(path)],
+        )
+        result = ReviewEngine().assess(
+            request,
+            judge=_AcceptAllJudge(),
+            source_reader=ExactSourceReader(path, source),
+        )
+        assert result.status == AssessmentStatus.INCOMPLETE
+        assert result.violations == []
+        assert any("unsupported" in w.message.lower() for w in result.warnings)
+
+    def test_duplicate_invariant_ids_are_incomplete(self) -> None:
+        path = "src/main/java/com/example/Api.java"
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/ok\")\n"
+            "    public String ok() { return \"ok\"; }\n"
+            "}\n"
+        )
+        request = ReviewRequest(
+            base_sha="base",
+            head_sha="head",
+            invariants=[
+                _invariant("no-domain-leak", title="First"),
+                _invariant("no-domain-leak", title="Second"),
+            ],
+            changed_files=[_java_changed_file(path)],
+        )
+        result = ReviewEngine().assess(
+            request,
+            judge=_AcceptAllJudge(),
+            source_reader=ExactSourceReader(path, source),
+        )
+        assert result.status == AssessmentStatus.INCOMPLETE
+        assert any("duplicate" in w.message.lower() for w in result.warnings)
+
+    def test_mixed_supported_and_unsupported_is_incomplete(self) -> None:
+        path = "src/main/java/com/example/Api.java"
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/ok\")\n"
+            "    public String ok() { return \"ok\"; }\n"
+            "}\n"
+        )
+        request = ReviewRequest(
+            base_sha="base",
+            head_sha="head",
+            invariants=[
+                _invariant("no-domain-leak"),
+                _invariant("custom-layering"),
+            ],
+            changed_files=[_java_changed_file(path)],
+        )
+        result = ReviewEngine().assess(
+            request,
+            judge=_AcceptAllJudge(),
+            source_reader=ExactSourceReader(path, source),
+        )
+        assert result.status == AssessmentStatus.INCOMPLETE
+        assert any("unsupported" in w.message.lower() for w in result.warnings)
+
+    def test_supported_invariants_still_assess_normally(self) -> None:
+        path = "src/main/java/com/example/Api.java"
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/ok\")\n"
+            "    public String ok() { return \"ok\"; }\n"
+            "}\n"
+        )
+        request = ReviewRequest(
+            base_sha="base",
+            head_sha="head",
+            invariants=[
+                _invariant("no-domain-leak"),
+                _invariant("no-temporary-monitoring"),
+            ],
+            changed_files=[_java_changed_file(path)],
+        )
+        result = ReviewEngine().assess(
+            request,
+            judge=_AcceptAllJudge(),
+            source_reader=ExactSourceReader(path, source),
+        )
+        assert result.status == AssessmentStatus.NO_CONFIRMED_VIOLATIONS
+        assert result.violations == []
+
+
+class TestPrimaryRootSurvivesIndexFailure:
+    def test_same_module_entity_resolved_when_source_roots_unavailable(self) -> None:
+        """Failed/over-budget list_source_roots must not disable primary-root resolution."""
+        path = "src/main/java/com/example/Api.java"
+        source = (
+            "package com.example;\n"
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Api {\n"
+            "    @GetMapping(\"/order\")\n"
+            "    public OrderEntity get() { return null; }\n"
+            "}\n"
+        )
+        entity = (
+            "package com.example;\n"
+            "import jakarta.persistence.Entity;\n"
+            "@Entity\n"
+            "public class OrderEntity {}\n"
+        )
+
+        class RootsUnavailableReader:
+            def changed_files(self):
+                return []
+
+            def read_file_at_ref(self, p: str, ref: str) -> bytes | None:
+                if p == path:
+                    return source.encode()
+                if p == "src/main/java/com/example/OrderEntity.java":
+                    return entity.encode()
+                return None
+
+            def list_source_roots(self, ref: str):
+                return None  # index unavailable
+
+        request = ReviewRequest(
+            base_sha="base",
+            head_sha="head",
+            invariants=[_invariant("no-domain-leak")],
+            changed_files=[
+                ChangedFile(
+                    path=path,
+                    status="modified",
+                    patch=(
+                        f"diff --git a/{path} b/{path}\n"
+                        f"--- a/{path}\n"
+                        f"+++ b/{path}\n"
+                        "@@ -1,1 +1,7 @@\n"
+                        "+package com.example;\n"
+                        "+import org.springframework.web.bind.annotation.*;\n"
+                        "+@RestController\n"
+                        "+class Api {\n"
+                        '+    @GetMapping("/order")\n'
+                        "+    public OrderEntity get() { return null; }\n"
+                        "+}\n"
+                    ),
+                    patch_complete=True,
+                )
+            ],
+        )
+        result = ReviewEngine().assess(
+            request,
+            judge=_AcceptAllJudge(),
+            source_reader=RootsUnavailableReader(),
+        )
+        assert result.status == AssessmentStatus.CONFIRMED_VIOLATIONS, (
+            f"expected confirmed domain leak via primary root, got {result.status} "
+            f"warnings={[w.message for w in result.warnings]} "
+            f"candidates={len(result.candidates)} gaps={result.coverage.skipped_files}"
         )

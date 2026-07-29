@@ -31,6 +31,7 @@ from invariant_guardian.domain.models import (
 from invariant_guardian.invariants import load_invariants
 from invariant_guardian.prompt import judge_message_chars
 from invariant_guardian.rules.java import (
+    SUPPORTED_INVARIANT_IDS,
     detect_candidates,
     detect_candidates_from_source,
     extract_changed_lines_from_patch,
@@ -69,6 +70,46 @@ class ReviewEngine:
                         message="No invariants loaded — cannot assess changes.",
                     )
                 ],
+            )
+
+        # --- capability / uniqueness gate -----------------------------------
+        # Unsupported or duplicate invariant IDs must never produce a false
+        # clean result. Detectors only exist for the v0.2 capability set.
+        capability_warnings: list[SafeWarning] = []
+        seen_ids: set[str] = set()
+        duplicate_ids: list[str] = []
+        unsupported_ids: list[str] = []
+        for inv in invariants:
+            if inv.id in seen_ids and inv.id not in duplicate_ids:
+                duplicate_ids.append(inv.id)
+            seen_ids.add(inv.id)
+            if inv.id not in SUPPORTED_INVARIANT_IDS and inv.id not in unsupported_ids:
+                unsupported_ids.append(inv.id)
+        if unsupported_ids:
+            capability_warnings.append(
+                SafeWarning(
+                    category="unsupported_invariant",
+                    message=(
+                        "Unsupported invariant ID(s) have no implemented "
+                        f"detector: {', '.join(unsupported_ids)}."
+                    ),
+                )
+            )
+        if duplicate_ids:
+            capability_warnings.append(
+                SafeWarning(
+                    category="duplicate_invariant",
+                    message=(
+                        "Duplicate invariant ID(s) prevent a complete "
+                        f"assessment: {', '.join(duplicate_ids)}."
+                    ),
+                )
+            )
+        if capability_warnings:
+            return Assessment(
+                status=AssessmentStatus.INCOMPLETE,
+                coverage=Coverage(context_truncated=True),
+                warnings=capability_warnings,
             )
 
         # --- coverage -------------------------------------------------------
@@ -229,12 +270,13 @@ class ReviewEngine:
             judge_candidates: list[JudgeCandidate] = []
 
             for i, c in enumerate(candidates):
-                inv = invariant_map.get(c.invariant_id)
-                invariant_text = (
-                    f"Rule: {inv.rule}\nRationale: {inv.rationale}"
-                    if inv
-                    else f"Rule: {c.invariant_id}"
-                )
+                matched = invariant_map.get(c.invariant_id)
+                if matched is not None:
+                    invariant_text = (
+                        f"Rule: {matched.rule}\nRationale: {matched.rationale}"
+                    )
+                else:
+                    invariant_text = f"Rule: {c.invariant_id}"
                 patch = file_patches.get(c.file, "")
                 context_hunk = (
                     _extract_bounded_context(patch, c.start_line, c.end_line)
@@ -452,8 +494,9 @@ def _build_type_resolver(
                 break
     source_roots.append(str(primary_root).lstrip("/"))
 
-    # Additional roots from the repository index (bounded)
-    source_index_unavailable = False
+    # Additional roots from the repository index (bounded).
+    # A failed/over-budget index must not disable primary-root resolution.
+    # Only extra roots are skipped; same-module types remain resolvable.
     if hasattr(source_reader, "list_source_roots"):
         try:
             extra_roots = source_reader.list_source_roots(head_sha)
@@ -463,22 +506,24 @@ def _build_type_resolver(
             for root in extra_roots:
                 if isinstance(root, str) and root and root not in source_roots:
                     source_roots.append(root)
-        else:
-            # Missing, malformed, or over-budget indexes cannot prove a
-            # repository-wide declaration lookup is unique.
-            source_index_unavailable = True
 
     def _resolve(type_name: str) -> str | None:
-        if source_index_unavailable:
-            return None
-        # Strip generic wrapper for resolution (P0 finding 2):
-        # "List<OrderEntity>" → resolve "OrderEntity"
+        # Resolve nested generic leaves:
+        # "ResponseEntity<List<OrderEntity>>" → "OrderEntity"
         simple = type_name.strip()
         if "<" in simple:
-            # Extract the first type argument from generic containers
-            inner = simple.split("<", 1)[-1].rstrip(">")
-            # Use the inner type, falling back to the raw name
-            simple = inner.strip() or simple
+            leaves = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", simple)
+            builtins = {
+                "List", "Set", "Map", "Collection", "Iterable", "Optional",
+                "ResponseEntity", "HttpEntity", "String", "Object", "UUID",
+                "Boolean", "Byte", "Short", "Integer", "Long", "Float",
+                "Double", "Character", "BigDecimal", "BigInteger",
+            }
+            leaf_candidates = [t for t in leaves if t not in builtins]
+            if leaf_candidates:
+                simple = leaf_candidates[-1]
+            else:
+                simple = leaves[-1] if leaves else simple.split("<", 1)[0]
         simple = simple.split(".")[-1]
         qualified_names: list[str] = []
         if "." in type_name:

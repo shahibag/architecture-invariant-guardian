@@ -20,6 +20,11 @@ from invariant_guardian.rules.java_ast import (
 TEMPORARY_MONITORING_ID = "no-temporary-monitoring"
 DOMAIN_LEAK_ID = "no-domain-leak"
 
+# Explicit capability registry for v0.2. Only these IDs have detectors.
+SUPPORTED_INVARIANT_IDS: frozenset[str] = frozenset(
+    {TEMPORARY_MONITORING_ID, DOMAIN_LEAK_ID}
+)
+
 # ---------------------------------------------------------------------------
 # Regex-based patterns (Phase 1 — preserved as fallback)
 # ---------------------------------------------------------------------------
