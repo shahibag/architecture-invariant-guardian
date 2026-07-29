@@ -1394,3 +1394,41 @@ class TestMonitoringStructuralVerification:
                 assert c.get("confidence") != "high", (
                     f"Sleep outside changed scope must not be high confidence: {c}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Regression: _classify_type naming-suffix heuristic (supersedes _is_internal_type)
+# ---------------------------------------------------------------------------
+class TestClassifyTypeSuffixHeuristic:
+    """The _classify_type function (not the removed _is_internal_type) handles
+    naming-suffix-based internal-type detection when no source_reader is
+    available.  All three _INTERNAL_TYPE_SUFFIXES must be recognized."""
+
+    def test_all_internal_suffixes_detected(self) -> None:
+        """Entity, PersistenceModel, and Aggregate suffixes must each produce
+        a low-confidence domain-leak candidate when no source_reader resolves
+        the declaration."""
+        from invariant_guardian.rules.java_ast import detect_domain_leak_candidates
+
+        template = (
+            "import org.springframework.web.bind.annotation.*;\n"
+            "@RestController\n"
+            "class Controller {{\n"
+            "    @GetMapping(\"/api\")\n"
+            "    public {suffix} get() {{ return null; }}\n"
+            "}}\n"
+        )
+
+        for suffix in ("OrderEntity", "OrderPersistenceModel", "OrderAggregate"):
+            source = template.format(suffix=suffix)
+            candidates = detect_domain_leak_candidates(
+                source, f"src/Controller.java", {5},
+            )
+            assert len(candidates) >= 1, (
+                f"Suffix {suffix} not detected by _classify_type heuristic: "
+                f"got {len(candidates)} candidate(s)"
+            )
+            assert candidates[0].get("confidence") == "low", (
+                f"Suffix {suffix}: expected low confidence without source_reader, "
+                f"got {candidates[0].get('confidence')}"
+            )

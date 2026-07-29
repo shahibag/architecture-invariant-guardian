@@ -795,31 +795,6 @@ def _build_internal_type_set(
     return internal
 
 
-def _is_internal_type(type_name: str, known_internal: set[str]) -> tuple[bool, str | None]:
-    """Check if *type_name* looks like an internal type.
-
-    Returns ``(is_internal, naming_suffix)`` where *naming_suffix* is the
-    matched suffix when the match was via naming convention rather than a
-    known JPA-annotated type.
-    """
-    if type_name in known_internal:
-        return True, None
-    # Strip generic wrapper to check the type argument
-    if type_name.endswith(">"):
-        # For "List<OrderEntity>" check "OrderEntity"
-        inner = type_name.split("<", 1)[-1].rstrip(">")
-        if inner in known_internal:
-            return True, None
-        if inner.endswith(_INTERNAL_TYPE_SUFFIXES):
-            for suffix in _INTERNAL_TYPE_SUFFIXES:
-                if inner.endswith(suffix):
-                    return True, suffix
-    for suffix in _INTERNAL_TYPE_SUFFIXES:
-        if type_name.endswith(suffix):
-            return True, suffix
-    return False, None
-
-
 # ---------------------------------------------------------------------------
 # P0 finding 2: typed resolution outcome
 # ---------------------------------------------------------------------------
