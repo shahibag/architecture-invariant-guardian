@@ -1,36 +1,79 @@
 # Invariant Guardian
 
-Invariant Guardian is a Python GitHub Action for repository-owned architecture invariant checks on Java/Spring pull requests.
+A safety-oriented GitHub Action that catches repository-specific architecture drift in Java/Spring pull requests without executing contributor code.
 
-It is not a general code-review bot. A finding must map to an invariant declared in `.guardian/invariants/`, cite changed-code evidence, and explain the architectural consequence. Human review remains the final decision.
+[![CI](https://github.com/shahibag/architecture-invariant-guardian/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/shahibag/architecture-invariant-guardian/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/release/shahibag/architecture-invariant-guardian?include_prereleases&label=v0.2.0)](https://github.com/shahibag/architecture-invariant-guardian/releases/tag/v0.2.0)
+[![License](https://img.shields.io/github/license/shahibag/architecture-invariant-guardian)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
 
-## Current release line (v0.2)
+- 📖 [Case study](docs/case-study.md)
+- 🎬 [Live demo repository](https://github.com/shahibag/guardian-java-demo)
+- 📊 [Offline evaluation report](tests/evaluation/reports/evaluation.md)
+- ⚠️ [Known limitations](docs/known-limitations-v0.2.md)
 
-Version 0.2 is an advisory architecture assessment GitHub Action for Java/Spring pull requests. It supports exactly two repository-owned invariants:
+## The problem
 
-- `no-temporary-monitoring`
-- `no-domain-leak`
+Generic linters and static analyzers cannot encode every repository-specific architecture decision: "persistence entities must not leak through REST boundaries" or "don't mask root-cause failures with scheduled retry loops." Architecture review is also easy to skip under delivery pressure.
 
-Deterministic Java AST analysis produces candidates. An OpenAI-compatible evidence judge (default DeepSeek V4 Flash) may only confirm or reject those candidates. The Action never executes pull-request code and never blocks merges by itself.
+Unrestricted LLM code review can invent findings, cite lines that were not changed, or opine on style and naming. Human review remains necessary, but reviewers need focused, evidence-based signals.
 
-Package version: `0.2.0`. The immutable git tag `v0.2.0` is created only after this line is merged and release gates pass — until then, pin a commit SHA or branch ref.
+## The approach
 
-## Local use
+Invariant Guardian reads a pull request, loads repository-owned invariants from the exact base SHA, detects candidates with deterministic Java AST analysis, and asks a constrained LLM judge to confirm or reject each candidate using bounded evidence.
 
-```bash
-python -m pip install -e '.[dev]'
-invariant-guardian assess \
-  --invariants tests/fixtures/invariants \
-  --diff tests/fixtures/temporary_monitoring.diff
+```text
+PR event
+  ↓
+Exact-SHA GitHub reader
+  ↓
+Scope and coverage gate
+  ↓
+Tree-sitter candidate detection
+  ↓
+Bounded evidence package
+  ↓
+Constrained LLM judgment
+  ↓
+Schema-validated assessment
+  ↓
+Idempotent PR comment + Action outputs
 ```
 
-## Repository invariant format
+```mermaid
+flowchart TD
+    A[Pull request event] --> B[Exact-SHA GitHub reader]
+    B --> C[Scope and coverage gate]
+    C --> D[Tree-sitter Java candidate detection]
+    D --> E[Bounded evidence package]
+    E --> F[Constrained LLM judgment]
+    F --> G[Schema-validated assessment]
+    G --> H[Idempotent PR comment]
+    G --> I[Action outputs]
+```
 
-See [the implementation-ready MVP specification](docs/implementation-ready-mvp.md) for the required Markdown format, execution policy, and delivery plan.
+## Safety properties
 
-## GitHub Action use
+- **No invented candidates.** The model receives only locations produced by deterministic AST analysis.
+- **Fail closed.** Missing evidence, unsupported invariants, duplicate IDs, oversized context, or provider failures return `assessment_incomplete`, never a clean result.
+- **No target execution.** Java source is parsed with Tree-sitter; it is never compiled, imported, or run.
+- **Repository-owned policy.** Invariants live in `.guardian/invariants/` and are loaded from the exact base SHA.
+- **Advisory only.** The Action emits outputs and a comment; it does not block merges by itself.
 
-Target repositories should run the Action on `pull_request` and grant only the permissions it needs:
+## Evidence
+
+- **544 automated tests** pass locally and in CI.
+- **53-case offline regression corpus** with positive and negative fixtures per invariant.
+- **Candidate precision and recall:** 100% / 100% for both `no-domain-leak` and `no-temporary-monitoring` on the documented corpus.
+- **Hosted E2E scenarios** in the demo repository cover clean, violation, remediation, unsupported, duplicate, and fork cases.
+- **Exact-SHA analysis:** invariant files and related source are read from precise commits.
+- **Zero target-code execution:** no `javac`, Maven, Gradle, or runtime invocation.
+
+> Controlled regression-fixture results are not a claim of 100% accuracy on arbitrary Java repositories.
+
+## Quick start
+
+Add `.guardian/invariants/no-domain-leak.md` and `.guardian/invariants/no-temporary-monitoring.md` to your repository, then add a workflow:
 
 ```yaml
 name: Invariant Guardian
@@ -47,7 +90,6 @@ jobs:
   assess:
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout@v4
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: shahibag/architecture-invariant-guardian@v0.2.0
         with:
@@ -57,40 +99,65 @@ jobs:
           model: deepseek-v4-flash
 ```
 
-> **Note:** `shahibag/architecture-invariant-guardian@v0.2.0` is an immutable
-> point-release reference that becomes available only after the v0.2.0 release
-> is published.  Until then, use a branch or commit SHA.
+### Without an LLM key
 
-Fork pull requests do not use the provider key and do not publish a comment.
+If `llm-api-key` is omitted, deterministic candidate detection still runs, but every candidate is reported as `assessment_incomplete` because the judge cannot confirm or reject it. This is safe: the result is incomplete, not clean.
 
-## Provider configuration
+### With an LLM key
 
-The Action uses the OpenAI Python SDK, but the endpoint and model are inputs. The default configuration is DeepSeek V4 Flash:
+The Action sends one bounded evidence package per candidate to the configured OpenAI-compatible endpoint. Provider failures are classified and reported as `assessment_incomplete`.
 
-| Input | Default |
+## Supported scope
+
+Version 0.2 supports exactly two repository-owned invariants:
+
+| Invariant | What it catches |
 | --- | --- |
-| `llm-base-url` | `https://api.deepseek.com` |
-| `model` | `deepseek-v4-flash` |
-| `llm-api-key` | no default; pass a GitHub Actions secret |
+| `no-domain-leak` | Persistence entities or internal aggregates returned from public Spring boundaries. |
+| `no-temporary-monitoring` | Scheduled, retry, or polling workarounds that mask root-cause fixes. |
 
-For OpenAI, set `llm-base-url` to `https://api.openai.com/v1` and select a Chat Completions-compatible model. The adapter requests JSON mode and always validates the response locally with Pydantic before publishing a finding.
+Arbitrary Markdown rules do **not** automatically obtain detectors. Only the two IDs above have implemented, tested detectors.
 
-### Secret storage
+## Outputs
 
-- **Local development:** create `.env.local` in the repository and store `LLM_API_KEY=...`; this file is ignored by Git. Restrict it to your user account (`chmod 600 .env.local`).
-- **GitHub Actions:** add `DEEPSEEK_API_KEY` as a repository or organization Actions secret, then pass it through `llm-api-key`. Never put a key in `action.yml`, a workflow file, Docker build arguments, commit history, or logs.
+| Output | Description |
+| --- | --- |
+| `assessment-status` | `no_confirmed_violations`, `confirmed_violations`, or `assessment_incomplete` |
+| `confirmed-count` | Number of confirmed violations |
+| `candidate-count` | Number of deterministic candidates |
+| `coverage-complete` | `true` if all in-scope changes were evaluated |
 
-Copy .env.local.example to .env.local for the local variable names. The action runner also accepts LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL when invoked outside GitHub Actions.
+## Local use
 
+```bash
+python -m pip install -e '.[dev]'
+invariant-guardian assess \
+  --invariants tests/fixtures/invariants \
+  --diff tests/fixtures/temporary_monitoring.diff
+```
 
-## Known limitations (v0.2)
+Local development secrets go in `.env.local` (ignored by Git).
 
-- Only the two supported invariant IDs above have detectors. Unsupported or duplicate IDs return `assessment_incomplete` rather than a false clean result.
-- Public helper methods on `@RestController` / `@Controller` classes are treated as public boundaries even without a method-level `@*Mapping` annotation. Tighten this in v0.3 if controller noise is too high.
-- Cross-module type resolution uses a bounded Git tree scan (entry and root caps). Failed or over-budget extra-root discovery no longer disables same-module primary-root resolution, but very large monorepos may still mark some cross-module leaks incomplete.
-- Nested generic leaves, overload identity, and Aggregate/PersistenceModel naming without JPA are supported for the advertised patterns; broader Java architecture claims are out of scope.
-- Live provider judgment is optional in CI. Provider failures always yield `assessment_incomplete`, never a false clean result.
+## Limitations
 
-## End-to-end verification
+- Only `no-domain-leak` and `no-temporary-monitoring` are implemented.
+- Java/Spring focus; other languages are not supported in v0.2.
+- Public helpers on `@RestController` / `@Controller` classes may be treated as boundaries.
+- Very large monorepos may hit bounded cross-module resolution caps.
+- Confirmed decisions require a working LLM provider.
 
-Follow the [end-to-end test plan](docs/end-to-end-test-plan.md) using two private repositories: one for the Action and one Java/Spring demo repository. It covers confirmed violations, clean changes, idempotency, fork safety, and provider failures.
+See [`docs/known-limitations-v0.2.md`](docs/known-limitations-v0.2.md) for the full list.
+
+## Project links
+
+- [Case study](docs/case-study.md)
+- [Demo repository](https://github.com/shahibag/guardian-java-demo)
+- [Evaluation report](tests/evaluation/reports/evaluation.md)
+- [Production-readiness design](docs/production-readiness-v0.2.md)
+- [Changelog](CHANGELOG.md)
+- [Security policy](SECURITY.md)
+- [Contributing guide](CONTRIBUTING.md)
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
