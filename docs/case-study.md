@@ -172,7 +172,7 @@ The offline regression corpus lives under `tests/evaluation/`.
 - **Final decision precision/recall:** 100% / 100% for both invariants, using a manifest-honouring judge.
 - **Incomplete tracking:** 1 domain-leak case expectedly reports incomplete due to bounded source availability.
 
-See the full report at [`tests/evaluation/reports/evaluation.md`](tests/evaluation/reports/evaluation.md).
+See the full report at [`tests/evaluation/reports/evaluation.md`](../tests/evaluation/reports/evaluation.md).
 
 > Controlled regression-fixture results are not a claim of 100% accuracy on arbitrary Java repositories.
 
@@ -195,7 +195,7 @@ See the full report at [`tests/evaluation/reports/evaluation.md`](tests/evaluati
 - **Monorepo bounds:** bounded cross-module resolution may mark some leaks incomplete rather than confirmed.
 - **Provider dependency:** confirmed decisions require a working OpenAI-compatible provider.
 
-See [`docs/known-limitations-v0.2.md`](docs/known-limitations-v0.2.md) for the complete list.
+See [`known-limitations-v0.2.md`](known-limitations-v0.2.md) for the complete list.
 
 ## 9. What I built
 
