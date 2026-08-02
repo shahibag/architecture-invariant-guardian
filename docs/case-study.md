@@ -88,17 +88,16 @@ Deterministic detection grounds every candidate in parseable source structure an
 
 ## 5. E2E evidence
 
-All scenarios below ran in the [`guardian-java-demo`](https://github.com/shahibag/guardian-java-demo) repository. The workflow used for these runs was pinned to commit `c878e6d` and did **not** pass a provider key, so deterministic analysis and fail-closed behavior are demonstrated; live provider confirmation is covered separately in §8.
+All scenarios below ran in the [`guardian-java-demo`](https://github.com/shahibag/guardian-java-demo) repository using the `v0.2.0` release and a DeepSeek provider key configured as a repository secret.
 
 | Scenario | PR | Expected result | Actual result | Status |
 | --- | --- | --- | --- | --- |
-| Clean DTO boundary | [#4](https://github.com/shahibag/guardian-java-demo/pull/4) | No confirmed violations | No confirmed violations | ✅ Pass |
-| Nested generic domain leak | [#5](https://github.com/shahibag/guardian-java-demo/pull/5) | Domain-leak candidate | No confirmed violations; 0 files evaluated | ⚠️ Incomplete evidence |
-| Temporary monitoring | [#6](https://github.com/shahibag/guardian-java-demo/pull/6) | Monitoring candidate | Assessment incomplete (judge unavailable) | ⚠️ Fail-closed |
+| Clean DTO boundary | [#13](https://github.com/shahibag/guardian-java-demo/pull/13) | No confirmed violations | No confirmed violations | ✅ Pass |
+| Nested generic domain leak | [#14](https://github.com/shahibag/guardian-java-demo/pull/14) | Domain-leak candidate confirmed | Domain-leak candidate confirmed | ✅ Pass |
+| Temporary monitoring | [#12](https://github.com/shahibag/guardian-java-demo/pull/12) | Monitoring candidate confirmed | Monitoring candidate confirmed | ✅ Pass |
 | Unsupported invariant | [#9](https://github.com/shahibag/guardian-java-demo/pull/9) | Assessment incomplete | Assessment incomplete (unsupported `no-sql-injection`) | ✅ Fail-closed |
-| Duplicate invariant | [#10](https://github.com/shahibag/guardian-java-demo/pull/10) | Assessment incomplete | Assessment incomplete (duplicate `no-domain-leak`) | ✅ Fail-closed |
 
-### Clean boundary (PR #4)
+### Clean boundary (PR #13)
 
 Bot comment excerpt:
 
@@ -109,7 +108,41 @@ Coverage: 1 file(s) evaluated
 
 Candidate count: 0  
 Coverage: complete  
-[Workflow run](https://github.com/shahibag/guardian-java-demo/actions/runs/30463181655)
+[Workflow run](https://github.com/shahibag/guardian-java-demo/actions/runs/30743356481)
+
+### Nested generic domain leak (PR #14)
+
+Bot comment excerpt:
+
+```text
+### No internal domain or persistence leakage
+- Location: src/main/java/com/example/OrderController.java:24
+- Why it matters: The controller is a public boundary, and returning OrderEntity directly leaks persistence internals to API consumers.
+- Evidence: Method listOrders returns OrderEntity which appears to be an internal domain/persistence type
+- Suggested direction: Introduce a dedicated response DTO (e.g., OrderSummaryResponse) and map OrderEntity fields to it before returning from the controller.
+```
+
+Candidate count: 1  
+Confirmed violations: 1  
+Coverage: complete  
+[Workflow run](https://github.com/shahibag/guardian-java-demo/actions/runs/30743362443)
+
+### Temporary monitoring (PR #12)
+
+Bot comment excerpt:
+
+```text
+### No temporary monitoring or retry loops masking a root-cause fix
+- Location: src/main/java/com/example/OrderService.java:27
+- Why it matters: The added retryUnprocessedOrders method contains a while loop that polls for unprocessed orders, changes their status to 'retrying', saves them, then sleeps 500ms.
+- Evidence: Method retryUnprocessedOrders contains sleep/backoff with state-change in the same retry loop
+- Suggested direction: Refactor to avoid polling. Trigger processing via an event-driven mechanism or explicit state transition.
+```
+
+Candidate count: 1  
+Confirmed violations: 1  
+Coverage: complete  
+[Workflow run](https://github.com/shahibag/guardian-java-demo/actions/runs/30743354494)
 
 ### Unsupported invariant (PR #9)
 
@@ -125,21 +158,9 @@ Coverage: 0 file(s) evaluated; context was truncated
 
 This demonstrates fail-closed behavior: an unsupported ID does not return clean.
 
-### Duplicate invariant (PR #10)
-
-Bot comment excerpt:
-
-```text
-⚠️ **Assessment incomplete.** This is **not** a clean review.
-Coverage: 0 file(s) evaluated; context was truncated
-
-### Notes
-- Duplicate invariant ID(s) prevent a complete assessment: no-domain-leak.
-```
-
 ### Remediation and idempotency
 
-Historical runs in the demo repository show a remediation update: PR code that originally exposed `OrderEntity` was corrected to return a DTO, and the bot comment updated to the clean result.
+Historical runs in the demo repository show a remediation update: PR code that originally exposed `OrderEntity` was corrected to return a DTO, and the bot comment updated to the clean result. The versioned marker ensures the same comment is edited and duplicates are not created.
 
 ## 6. Evaluation
 
